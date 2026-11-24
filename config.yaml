@@ -1,0 +1,379 @@
+# Karen's settings. setup.py (run setup.bat) fills in the user section and turns features on or off.
+user:
+  name: ""                # what Karen calls you
+  accent: ""              # optional, e.g. " of Indian-accented English" (helps the AI guess misheard words)
+
+llm:
+  backends:   # OpenAI-compatible APIs, tried in order; the next one answers if one fails (quota, outage)
+    - name: gemini            # free tier; Google may use free-tier prompts to improve its products
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+      key_env: GEMINI_API_KEY
+      model: gemini-3.5-flash-lite   # ~0.7 s to first word, steady; tools work. Bigger Flash models hit free quota.
+      params: {reasoning_effort: minimal}
+    - name: groq              # free (1,000 requests/day, 30/min), very fast; JARVIS's AI. Tested 2026-10-10: 6/6 tool calls,
+      base_url: https://api.groq.com/openai/v1   # ~0.5 s, chat first word 0.46 s (gpt-oss-120b 5/6, qwen3.8-27b 3/6)
+      key_env: GROQ_API_KEY
+      model: openai/gpt-oss-20b
+      retries: 0            # a 429 (8K tokens/min) moves on to the next backend at once; retrying waited ~70 s
+      timeout: 20
+      params: {reasoning_effort: low}
+    - name: openrouter        # paid, pennies (needs OpenRouter credits); fallback, and private backend for tool requests
+      base_url: https://openrouter.ai/api/v1
+      key_env: OPENROUTER_API_KEY
+      model: deepseek/deepseek-v4.1-flash
+      params: {extra_body: {reasoning: {enabled: false}, provider: {zdr: true}}}   # zero-data-retention providers only
+    - name: openrouter-free   # free (no credits, ~50 requests/day), zero data retention, tools (text only); busy at times
+      base_url: https://openrouter.ai/api/v1
+      key_env: OPENROUTER_API_KEY
+      model: inclusionai/ling-3.0-flash-sante:free   # qwen3.8-27b:free was withdrawn 2026-10-06; ling: 4/4 tool calls
+      retries: 3              # the free pool often answers 429 "rate-limited upstream"; retried with backoff
+      timeout: 15             # give up on a stuck try quickly (worst case about a minute, not minutes)
+      params: {extra_body: {reasoning: {enabled: false}, provider: {zdr: true}}}
+  private_backends: [openrouter, openrouter-free]   # requests that use tools (email, calendar, files) only go here
+  # Groq keeps requests up to 30 days for abuse checks unless Zero Data Retention is on (console.groq.com >
+  # Settings > Data Controls). Set true once it's on: Groq then also takes tool requests and the image features.
+  groq_zdr: false  # true once Zero Data Retention is on in your Groq account
+  max_tool_rounds: 5
+  max_tokens: 300
+  history_turns: 6
+  system_prompt: >-
+    You are Karen, {user}'s voice assistant. Their words come from speech recognition{accent} and may
+    contain misheard words; infer what they most likely meant.
+    You have no live data (weather, news, prices) unless a tool gives it to you; say so instead of guessing.
+    Answer in one to three short spoken sentences. Plain text only: no markdown, lists, or emojis.
+    Only end with a question when you need their answer; never add offers like "anything else?".
+
+audio:
+  input_device: null      # null = Windows default mic; or a device index / name from: python main.py --devices
+  output_device: null
+  vad_threshold: 0.5
+  silence_ms: 700         # pause that ends an utterance
+  max_utterance_s: 15
+  duck_level: 0.15        # other apps' sound drops to 15% while Karen listens and talks (1 = off)
+
+wake:
+  engine: personal        # personal = trained on your voice (scripts/train_wake.py) | oww | whisper
+  personal_model: models/karen_personal.pkl   # falls back to whisper if missing
+  oww_model: models/karen.onnx           # optional openWakeWord model; falls back to whisper if missing
+  threshold: 0.5
+  verifier: models/karen_verifier.pkl    # optional, trained on your own "Karen" clips
+  verifier_threshold: 0.3
+  patience: 2             # personal wake word: hits in a row (160 ms each). 3 = fewer false wakes, more missed ones
+  continue_s: 1.2         # after the wake word, wait this long for "Karen, <request>" before the chime
+  command_timeout_s: 5    # after the chime, how long to wait for the request
+  followup_s: 6           # after Karen asks a question, how long she listens for the answer (no wake word)
+  model: tiny.en          # whisper engine only
+  words: [karen, karin, keren, karren, kieran, korinne]   # spellings Whisper uses; a leading C counts as K
+
+stt:
+  model: small.en         # local fallback; on a test voice 29% word errors vs 45% for base.en, ~3 s per request
+  compute_type: int8
+  threads: 8
+  cloud:                  # Groq Whisper first (needs GROQ_API_KEY; remove this block for local only), small.en on failure
+    model: whisper-large-v3
+    timeout: 5
+
+tts:
+  model: models/kokoro-v1.0.onnx
+  voices: models/voices-v1.0.bin
+  voice: af_heart
+  speed: 1.0
+
+ui:
+  planned:   # shown dimmed in the interface's Abilities panel until they are built
+
+mcp_servers:   # each one is started over stdio; its tools are only sent to the LLM when triggers match
+  google:      # github.com/taylorwilsdon/google_workspace_mcp (smallest "core" tier)
+    label: Google Workspace
+    enabled: false   # setup.py turns this on once the Google sign-in keys are in .env (docs/SETUP.md, step 6)
+    command: uvx
+    # "complete" tier for Gmail's label/filter tools (organiser); every other non-core tool is disabled below
+    args: [workspace-mcp@1.30.1, --single-user, --tool-tier, complete, --tools, gmail, calendar, drive, docs, sheets,
+           --disabled-tools, import_to_google_slides, import_to_google_doc, import_to_google_sheets,
+           get_drive_file_download_url,
+           get_gmail_attachment_content, get_gmail_thread_content, draft_gmail_message,
+           get_gmail_threads_content_batch, start_google_auth, create_calendar, query_freebusy, manage_out_of_office,
+           manage_focus_time, list_drive_items, copy_drive_file, update_drive_file, manage_drive_access,
+           set_drive_file_permissions, get_drive_file_permissions, check_drive_file_public_access, export_doc_to_pdf,
+           search_docs, find_and_replace_doc, list_docs_in_folder, insert_doc_elements, update_paragraph_style,
+           get_doc_as_markdown, list_document_comments, manage_document_comment, insert_doc_image,
+           update_doc_headers_footers, batch_update_doc, inspect_doc_structure, create_table_with_data,
+           debug_table_structure, manage_doc_tab, list_spreadsheets, get_spreadsheet_info, format_sheet_range,
+           list_sheet_tables, create_sheet, manage_sheet_tab, append_table_rows, resize_sheet_dimensions,
+           move_sheet_rows, list_spreadsheet_comments, manage_spreadsheet_comment, manage_conditional_formatting,
+           manage_named_range]
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: "${GOOGLE_OAUTH_CLIENT_ID}"
+      GOOGLE_OAUTH_CLIENT_SECRET: "${GOOGLE_OAUTH_CLIENT_SECRET}"
+      USER_GOOGLE_EMAIL: "${USER_GOOGLE_EMAIL}"
+      ALLOWED_FILE_DIRS: "${USERPROFILE}/Documents/Karen"   # Gmail attachments: Karen's reports and outputs only
+    inject: {user_google_email: "${USER_GOOGLE_EMAIL}"}   # filled in automatically, hidden from the LLM
+    hide_args: [page_token, include_headers, include_attachments, forward_message_id,
+                include_forwarded_attachments, from_name, from_email, include_signature, quote_original,
+                conference_data, conference_provider, conference_uri, conference_passcode, conference_id,
+                color_id, transparency, visibility, guests_can_modify, guests_can_invite_others,
+                guests_can_see_other_guests, rsvp_comment, start_timezone, end_timezone, drive_id,
+                include_items_from_all_drives, corpora, fileUrl, base64_content, base64_sha256,
+                content_mime_type, suggestions_view_mode, tab_id, segment_id, preserve_context,
+                bold, italic, underline, strikethrough, font_size, font_family, font_weight, text_color,
+                background_color, link_url, clear_link, baseline_offset, small_caps, include_hyperlinks,
+                include_notes, include_formulas, include_smart_chips, chips, chip_type]
+    triggers:   # tool pattern -> words in the request that select those tools (first matching pattern wins)
+      "*label*|*filter*": [organise, organize, organising, organizing, label, labels, clean up my inbox, clean my inbox,
+                           sort my mail, sort my email, archive, filter, filters, tidy, declutter, promotions]
+      "*gmail*": [email, e-mail, mail, gmail, inbox, reply, replied, sender, unread, good morning, briefing, brief me, my day]
+      "*calendar*|*event*": [calendar, meeting, schedule, event, appointment, agenda, busy, free time, good morning,
+                             briefing, brief me, my day, plan for today]
+      "*drive*": [google drive, my drive, in drive, drive folder, shared with me]   # not "C drive" / local files
+      "*doc*": [google doc, google docs, gdoc, docs.google]
+      "*sheet*|*spreadsheet*": [google sheet, google sheets, gsheet]
+
+  pc:          # servers/pc_control/server.py: apps, sound, web, system, windows, keys, clicks, files, settings, power mode
+    label: PC control
+    command: "{python}"
+    args: [servers/pc_control/server.py]
+    timeout: 300           # power mode can take a few minutes
+    triggers:   # tool groups, so a request only sends the tools it needs
+      "*window*|show_desktop|press_keys|click|scroll|read_window|type_text|clipboard":
+        [window, windows, desktop, minimize, minimise, maximize, maximise, switch to, snap, click, press, shortcut,
+         scroll, read this, read the, on screen, type, copy, paste, tab, menu, button, close this]
+      "find_file|open_file|create_folder|move_file|delete_file":
+        [file, files, folder, document, move, rename, copy, recycle, delete, downloads, desktop, documents, pictures]
+      "brightness|dark_mode|open_settings":
+        [brightness, brighter, dimmer, dark mode, light mode, settings, wifi, wi-fi, bluetooth, night light, display,
+         hotspot, airplane]
+      "clipboard_history|copy_from_history": [copied, i copied, copy earlier, clipboard history, paste the, copied before,
+                                             what did i copy]
+      "junk_scan|clean_junk": [clean up, cleanup, free up, space, storage, junk, temp files, cache, disk full,
+                               recycle bin, c drive]
+      "read_page": [summarise, summarize, summary, this page, this article, this document, read this, read the page,
+                    translate, what does it say, what does this, explain this, tl;dr, key points]
+      "*whatsapp*": [whatsapp, whats app, message, messages, text him, text her, tell him, tell her, send a message,
+                     chat with, chats, unread, reply to]
+      "operate": [click, select, choose, pick, first, second, third, last, play, song, video, music, playlist,
+                  fill, form, sign in, log in, search, result, page, tab, button, menu, on screen, website, youtube,
+                  spotify, instagram, whatsapp, select the, open the, scroll]
+      "explain_error": [error, errors, exception, traceback, bug, what's wrong, not working, failed, crash, crashed,
+                        warning, this error, fix this, why is it]
+      "power_mode": [power mode, automate, script, organise, organize, sort my, rename all, bulk, spreadsheet, excel, csv]
+      "*": [open, close, launch, quit, app, volume, louder, quieter, softer, mute, unmute, sound, play, pause,
+            resume, next song, previous song, skip, song, music, track, screenshot, screen, lock, battery, cpu,
+            ram, memory, disk, storage, system, shut down, shutdown, restart, reboot, sleep, website, browser,
+            search the web, google, youtube]
+
+  alexa:       # servers/alexa/server.py: smart home through Amazon Alexa (unofficial AlexaPy; sign in: scripts/alexa_login.py)
+    label: Smart home (Alexa)
+    enabled: false   # turn on after: python scripts/alexa_login.py
+    command: "{python}"
+    args: [servers/alexa/server.py]
+    triggers:
+      "*": [light, lights, lamp, bulb, fan, ac, a/c, air conditioner, temperature, degrees, plug, socket, tv,
+            television, geyser, heater, iron, washing machine, bedroom, hall, kitchen, living room, bathroom,
+            turn on, turn off, switch on, switch off, brightness, dim, brighter, alexa, routine, smart home,
+            devices, good night, good morning]
+
+  daily:       # servers/daily/server.py: weather, news, reminders/timers, memory, briefing (free, no keys)
+    label: Everyday (weather, news, reminders, memory)
+    command: "{python}"
+    args: [servers/daily/server.py]
+    triggers:
+      "weather": [weather, temperature, rain, raining, umbrella, hot, cold, forecast, humid, sunny, climate]
+      "news": [news, headlines, happening, latest, update on, updates on]
+      "*reminder*|set_timer": [remind, reminder, reminders, timer, alarm, wake me, in minutes, in an hour, cancel the]
+      "remember|recall|forget": [remember, forget, recall, what's my, what is my, where did i, note that, keep in mind,
+                                 do you know my, my birthday, password hint]
+      "*todo*|*note*|show_lists": [to-do, todo, to do, task list, my list, tasks, note, notes, note down, jot,
+                                   write down, tick off, mark done, shopping list]
+      "briefing": [good morning, briefing, brief me, my day, plan for today, what's today]
+      "set_persona|clear_persona|set_mode": [talk like, talk to me like, act like, behave like, speak like, be my,
+                                    personality, persona, from now on, here after, hereafter, stop talking like,
+                                    be normal, normal karen, your character, your style, in character, love mode,
+                                    work mode, full work, both mode, lite love, light love, romantic mode,
+                                    balanced mode, girlfriend mode, professional mode]
+
+  files:       # servers/files/server.py: read, describe, convert, merge/split, resize, show (local and free)
+    label: Files (read, convert, show)
+    command: "{python}"
+    args: [servers/files/server.py]
+    timeout: 180          # Office conversions can take a while
+    triggers:
+      "*": [pdf, file, files, document, doc, docx, word file, image, photo, picture, convert, merge, split, pages,
+            compress, resize, upload, uploaded, attached, attachment, show me, preview, open it, summarise this,
+            summarize this, this file, csv, spreadsheet]
+
+  dev:         # servers/dev/server.py: projects, VS Code, fixed git commands (commit/push ask first)
+    label: Developer (projects, git)
+    command: "{python}"
+    args: [servers/dev/server.py]
+    triggers:
+      "*": [project, projects, vs code, vscode, visual studio, code editor, git, commit, push, pull, repo, repository,
+            branch, changes, diff, coding]
+      "open_in_editor": [open it, open that, open the file, go to the line, line, error, fix this]
+
+  explore:     # servers/explore/server.py: live webcam look (zero-retention vision) and research mode (browser windows)
+    label: Camera and research
+    command: "{python}"
+    args: [servers/explore/server.py]
+    timeout: 240          # research reports take about a minute
+    triggers:
+      "look|camera_off": [camera, webcam, web cam, what am i holding, in my hand, holding, what do you see, can you see,
+                          look at this, look at, see this, what is this, what's this, read this label, this product]
+      "research_*": [research, power research, deep dive, find everything about, look into]
+      "research_report|research_summary": [report, research report, pdf report, scan this, scan it, summarise my research,
+                                           summarize my research, save my research, research summary, make a pdf]
+      "work_mode*": [coding mode, study mode, chill mode, start coding, start studying, time to code, time to study,
+                     coding mode off, study mode off, chill mode off]   # "work mode" = Karen's personality mode
+
+  dots:        # servers/dots/server.py: Spaces (Markdown pages), web reading for the Researcher, Dots and their schedules
+    label: Dots and Spaces
+    command: "{python}"
+    args: [servers/dots/server.py]
+    timeout: 120
+    max_result_chars: 9000   # Dots read whole pages and web text (Karen's own voice answers still get 2,500)
+    triggers:
+      "*page*": [page, pages, spaces, my space, in spaces, notes page, saved page, research page, draft page]
+      "*dot*": [dot, dots, researcher, writer, coder, organiser, organizer, helpers, specialist, every morning,
+                every day, every evening, every weekday, scheduled task, scheduled tasks]
+
+  jarvis:      # servers/jarvis/server.py: health, productivity, PDF/zip tools, translator voice, recorders
+    label: JARVIS tools
+    command: "{python}"
+    args: [servers/jarvis/server.py]
+    triggers:
+      "wellness_reminder|medicine_reminder|stop_wellness": [water, drink water, hydrate, eyes, eye break, stretch,
+                                                           posture, break reminder, medicine, tablet, pill, medication,
+                                                           stop reminding, stop the water, health reminder]
+      "pomodoro|hiit": [pomodoro, focus session, focus timer, hiit, workout, exercise, interval, tabata, stop the
+                        workout, stop pomodoro]
+      "bmi|calories": [bmi, body mass, calorie, calories, my weight, diet, tdee, how much should i eat]
+      "log_mood|mood_summary": [my mood, mood, i feel, i'm feeling, feeling, stressed, how have i been]
+      "password_generator": [password, passcode, strong password]
+      "text_tool": [word count, count the words, count words, clipboard text, uppercase, lowercase, title case,
+                    clean the text, clean up the text, tidy the text]
+      "shorten_url": [shorten, short link, short url, tiny url]
+      "pdf_*": [lock the pdf, password on the pdf, protect the pdf, unlock the pdf, remove the password, compress,
+                make it smaller, reduce the size, rotate, watermark, confidential, draft stamp]
+      "zip_files|unzip": [zip, unzip, extract, compress these, archive]
+      "find_duplicates|folder_size": [duplicate, duplicates, same files, folder size, how big, taking space,
+                                      biggest files]
+      "tidy_folder*|batch_rename*": [tidy, organise my, organize my, clean up my downloads, clean up my desktop,
+                                     sort the files, rename all, batch rename, number the files]
+      "qr_code": [qr, qr code]
+      "convert_image|convert_audio": [convert, to png, to jpg, to jpeg, to webp, to mp3, to wav, extract the audio,
+                                      extract the sound, icon]
+      "speak_translation": [translate, translation, in spanish, in french, in hindi, in italian, in portuguese,
+                            in chinese, in mandarin, in japanese, in german, in kannada, in tamil, how do you say,
+                            how do i say, say it in]
+      "*_recording|recording_status": [record, recording, voice memo, voice note, screen record, record my screen,
+                                       record the screen, stop recording]
+
+  phone:       # servers/phone/server.py: Android over adb wireless debugging (pair once: scripts/phone_pair.py)
+    label: Phone (Android)
+    enabled: false   # turn on after pairing: python scripts/phone_pair.py
+    command: "{python}"
+    args: [servers/phone/server.py]
+    timeout: 240          # phone_operate / sending can take a minute or two
+    triggers:
+      "phone_call|phone_end_call|phone_answer_call|phone_call_log|phone_find_contact|phone_*sms":
+        [call, ring, dial, hang up, end the call, cut the call, pick up, answer the call, missed call, who called,
+         sms, text message, send a text, a text to, text to, number of, phone number, contact number]
+      "*": [phone, mobile, my phone, on my phone, from my phone, android, notification, notifications]
+
+confirm: ["jarvis__tidy_folder_apply", "jarvis__batch_rename_apply", "*batch_modify_gmail*", "*manage_gmail_filter*", "*manage_gmail_label*", "*send*", "*delete*", "*trash*", "*manage_event*", "*shutdown*", "*restart*", "pc__sleep", "pc__power_mode", "pc__clean_junk",
+          "dev__git_commit", "dev__git_push", "phone__phone_call", "alexa__power_appliance", "alexa__alexa_command", "alexa__run_routine"]   # spoken yes/no first
+
+avatar:                  # avatar mode characters (Settings > Avatar). Model files stay in models/ (git-ignored)
+  characters:
+    - id: karen
+      name: Karen (girl)
+      file: models/karen.vrm      # VRM: full face, expressions and lip-sync (scripts/download_models.py fetches it)
+    # Add your own: a VRM from VRoid Hub (check its licence) or a Mixamo-rigged FBX, e.g.
+    # - {id: fox, name: Fox girl, file: models/avatars/fox.vrm, credit: "the creator's name"}
+    # - {id: hero, name: Hero, file: models/hero/hero_rigged.fbx, textures: models/hero}
+    # romance: false turns off the kiss/bashful reactions for a character
+
+explore:
+  country: ""             # research reports give prices for this country, e.g. India
+  camera: 0              # webcam index (0 = Integrated Webcam)
+  camera_on_s: 60        # the camera stays on this long after a look, for follow-ups, then turns off
+  vision_model: deepseek/deepseek-v4.1-flash
+  browser: edge          # research mode windows: edge, chrome or brave
+  top_results: 5         # real web results (free search, no key) in the "top articles" window
+  # report_model: deepseek/deepseek-v4.1-flash   # writes reports/summaries (unset = the same free fallback chain)
+  modes:                 # work modes: "coding mode on" ... "mode off". project = folder opened in VS Code,
+    coding:              # apps = programs/URIs to start, urls = one browser window, music = minimized window
+      project: ""        # a folder to open in VS Code, e.g. "%USERPROFILE%/source/repos/my-app"
+      urls: [https://github.com, https://stackoverflow.com, https://docs.python.org/3/]
+      music: https://www.youtube.com/watch?v=jfKfPfyJRdk          # lofi hip hop radio (live)
+    study:
+      urls: [https://docs.new, https://en.wikipedia.org, https://www.khanacademy.org]
+      music: https://www.youtube.com/watch?v=jfKfPfyJRdk
+    chill:
+      urls: [https://www.youtube.com]
+      music: https://music.youtube.com
+
+phone:
+  device: ""             # adb serial if several devices are connected; empty = the only one
+  max_steps: 14          # phone_operate actions per task
+  settle_s: 1.2          # wait after each tap before reading the screen again
+  # model: deepseek/deepseek-v4.1-flash   # unset = the free zero-retention fallback
+
+phone_watch:             # voice Karen says incoming calls and new messages from the paired phone (core/phonewatch.py)
+  enabled: false          # turn on after pairing your phone (scripts/phone_pair.py)
+  calls: true            # "Alex is calling. Pick up or reject?"
+  messages: true         # "WhatsApp from Mom: ..." (security codes hidden; only "New WhatsApp" while face-locked)
+  apps: [com.whatsapp, com.whatsapp.w4b, com.google.android.apps.messaging]   # not Telegram: Remote's own chats
+  quiet: "23:00-07:00"   # messages are only shown, not spoken, in this window (calls always speak)
+
+morning:                 # the first time she's with you each morning (start-up or after your first request), unasked
+  enabled: true
+  window: "05:00-11:30"
+  request: "Good morning! Give me my morning briefing: today's weather, top news, today's reminders and calendar, and
+    any important new emails. Keep it short and friendly."
+
+face:                    # face unlock (core/face.py; enroll: scripts/enroll_face.py; on/off: Settings > Face unlock)
+  threshold: 0.42        # SFace cosine score that counts as you (OpenCV suggests 0.363; higher = stricter)
+  check_s: 8             # how long she looks for your face before giving up
+  relock_min: 30         # after this long with no requests, the next one needs your face again
+
+remote:                  # Karen Remote (remote.py): Telegram / WhatsApp chat from the phone
+  mail_reminders: true   # scan new Gmail for dates and suggest reminders (tap ✅/❌ in Telegram)
+  mail_check_min: 60     # how often; a scan with no new mail makes no AI request
+  keep_awake: plugged_in # keep the PC from sleeping while Remote runs: plugged_in (never drains the battery),
+                         # always, or off. Closing the lid / the power button still put it to sleep.
+
+alexa:
+  region: amazon.com      # the Amazon site your Alexa account uses (amazon.com, amazon.co.uk, ...)
+  echo: ""                # which Echo runs free-form commands; empty = the first online one
+  high_power:             # need a spoken yes: by Alexa device type, or by a word in the device's name
+    types: [AIR_CONDITIONER, THERMOSTAT, WATER_HEATER, OVEN, MICROWAVE, WASHER, DRYER, DISHWASHER, SPACE_HEATER]
+    names: [ac, a/c, air conditioner, heater, geyser, water heater, oven, microwave, iron, washing machine,
+            washer, dryer, dishwasher, induction, kettle, motor, pump]
+
+pc_control:
+  apps: {}      # extra names -> exe path or command, e.g. {"vs code": code}. Start Menu apps work automatically.
+  vision:
+    model: deepseek/deepseek-v4.1-flash   # describes screenshots on request, via zero-data-retention providers
+  whatsapp_browser: chrome   # where WhatsApp Web is signed in, used when no WhatsApp window is open
+  screen_agent:   # operate: looks at the window (UI Automation list + screenshot) and clicks/types step by step
+    model: deepseek/deepseek-v4.1-flash   # vision-capable, via OpenRouter zero-data-retention providers
+    screenshots: true      # send a small screenshot each step (better at "the first song"); false = element list only
+    max_steps: 12
+    settle_s: 1.2          # wait after each action before looking again
+  power_mode:   # optional: Open Interpreter writes and runs code; asks before the task and before risky steps
+    python: ""    # the Python 3.12 that has open-interpreter installed (empty = power mode off), see docs/SETUP.md
+    model: deepseek/deepseek-v4.1-flash   # via OpenRouter, zero-data-retention providers
+    max_steps: 8
+    timeout_s: 240
+
+daily:
+  city: ""                       # home city for weather and the briefing, e.g. London
+  news_region: "hl=en-US&gl=US&ceid=US:en"   # Google News edition, e.g. India: hl=en-IN&gl=IN&ceid=IN:en
+
+files:
+  read_chars: 12000       # how much of a file's text the AI gets at once
+  vision_model: deepseek/deepseek-v4.1-flash
+
+dev:
+  project_roots: ["%USERPROFILE%/Desktop", "%USERPROFILE%/source/repos", "%USERPROFILE%/Documents/GitHub"]
+  projects: {}            # extra names -> folders, e.g. {rover: "D:/code/rover"}

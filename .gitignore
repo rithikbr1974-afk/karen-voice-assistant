@@ -1,0 +1,25 @@
+# secrets: never commit these
+.env
+client_secret*.json
+credentials*.json
+token*.json
+*.token
+.credentials/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# downloaded models and your own avatars/motions (scripts/download_models.py fetches the free ones)
+models/
+
+# your personal data: logs, voice recordings, settings, reminders, memories, face profile, uploads
+logs/
+voice_samples/
+voice_tests/
+settings.json
+data/
+
+# avatar files linked from models/ at start-up
+ui/avatar/

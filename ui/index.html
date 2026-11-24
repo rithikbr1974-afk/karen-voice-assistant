@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KAREN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="sleeping">
+<canvas id="core"></canvas>
+<canvas id="avatar"></canvas>
+<div id="avatar-status"></div>
+
+<header>
+  <div class="brand"><h1>KAREN</h1><span class="state" id="state-label">STANDBY</span></div>
+  <div class="hud">
+    <span id="demo-badge">DEMO · NOT CONNECTED</span>
+    <span><i class="dot" id="dot-mic"></i>MIC</span>
+    <span><i class="dot" id="dot-brain"></i><span id="hud-brain">BRAIN</span></span>
+    <span><i class="dot" id="dot-voice"></i>VOICE</span>
+    <span id="clock">--:--</span>
+  </div>
+</header>
+
+<div class="column left">
+  <section class="panel" id="p-system">
+    <h2>SYSTEM <small id="sys-uptime"></small></h2>
+    <div class="stat"><span class="label">CPU</span><span class="bar"><i id="bar-cpu"></i></span><span class="value" id="v-cpu">--</span></div>
+    <div class="stat"><span class="label">MEMORY</span><span class="bar"><i id="bar-ram"></i></span><span class="value" id="v-ram">--</span></div>
+    <div class="stat"><span class="label">BATTERY</span><span class="bar"><i id="bar-bat"></i></span><span class="value" id="v-bat">--</span></div>
+    <div class="stat"><span class="label">DISK</span><span class="bar"><i id="bar-disk"></i></span><span class="value" id="v-disk">--</span></div>
+    <canvas class="spark" id="spark-cpu"></canvas>
+    <div class="details" id="sys-details">CPU history, last 60 s</div>
+  </section>
+
+  <section class="panel" id="p-brain">
+    <h2>BRAIN <small id="brain-model">--</small></h2>
+    <div class="kv"><span>Backend</span><b id="brain-backend">--</b></div>
+    <div class="kv"><span>First word</span><b id="brain-latency">--</b></div>
+    <div class="kv"><span>Memory</span><b id="brain-memory">0 turns</b></div>
+    <canvas class="spark" id="spark-llm"></canvas>
+    <div class="details">First-word time of the last 20 answers. Fallback switches are shown in amber.</div>
+  </section>
+
+  <section class="panel" id="p-voice">
+    <h2>VOICE PIPELINE <small id="wake-engine">--</small></h2>
+    <div class="kv"><span>Speech to text</span><b id="t-stt">--</b></div>
+    <div class="kv"><span>Voice starts</span><b id="t-voice">--</b></div>
+    <div class="kv"><span>Speaker</span><b id="voice-name">--</b></div>
+    <canvas class="spark" id="wave"></canvas>
+    <div class="details">Live microphone waveform.</div>
+  </section>
+</div>
+
+<div class="column right">
+  <section class="panel" id="transcript">
+    <h2>CONVERSATION <small id="msg-count"></small></h2>
+    <div id="messages"></div>
+  </section>
+
+  <section class="panel" id="p-abilities">
+    <h2>ABILITIES</h2>
+    <div id="abilities"></div>
+  </section>
+</div>
+
+<div id="attachments"></div>
+<div id="dropzone"><div>Drop files for Karen</div></div>
+<div id="dock">
+  <button class="btn talk" id="btn-talk" title="Talk to Karen (Space)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+  </button>
+  <button class="btn" id="btn-add" title="Add files (or drop them on the window)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+  <input id="cmd" placeholder="Say “Karen…” or type a command" autocomplete="off">
+  <button class="btn" id="btn-send" title="Send (Enter)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+  </button>
+  <button class="btn" id="btn-stop" title="Stop talking (Esc)">
+    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+  </button>
+  <button class="btn" id="btn-sleep" title="Mute the microphone">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg>
+  </button>
+  <button class="btn" id="btn-avatar" title="Avatar mode: anime Karen">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0M8 5.5c1.5 1.2 6.5 1.2 8 0"/></svg>
+  </button>
+  <button class="btn" id="btn-spaces" title="Spaces and Dots (pages your helpers write)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h10l6 6v10H4z"/><path d="M14 4v6h6M8 14h8M8 17h5"/></svg>
+    <i id="dots-busy"></i>
+  </button>
+  <button class="btn" id="btn-settings" title="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
+</div>
+
+<aside id="settings">
+  <button class="btn" id="close-settings" title="Close">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+  <h2>SETTINGS</h2>
+  <div class="field">
+    <label>VOICE</label>
+    <select id="set-voice">
+      <option value="af_heart">Heart (American)</option>
+      <option value="af_bella">Bella (American)</option>
+      <option value="af_nicole">Nicole (American, soft)</option>
+      <option value="bf_emma">Emma (British)</option>
+      <option value="bf_isabella">Isabella (British)</option>
+      <option value="bf_alice">Alice (British)</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>SPEAKING SPEED <b id="lbl-speed">1.00</b></label>
+    <input type="range" id="set-speed" min="0.8" max="1.3" step="0.05" value="1">
+  </div>
+  <div class="field">
+    <label>BRAIN</label>
+    <select id="set-brain"></select>
+    <div class="hint">The other one is used automatically if this one fails.</div>
+  </div>
+  <div class="field">
+    <label>WAKE SENSITIVITY <b id="lbl-wake">0.50</b></label>
+    <input type="range" id="set-wake" min="0.2" max="0.9" step="0.05" value="0.5">
+    <div class="hint">Lower wakes more easily but may trigger by mistake. Not used by the Whisper fallback.</div>
+  </div>
+  <div class="field">
+    <label>MODE</label>
+    <div class="mode-buttons" id="set-mode">
+      <button data-mode="work" title="Focused and efficient, no romance">💼<span>WORK</span></button>
+      <button data-mode="both" title="Work first, with a little love">💼💕<span>BOTH</span></button>
+      <button data-mode="love" title="Warm, affectionate and playful">💕<span>LOVE</span></button>
+      <button data-mode="" title="Plain Karen, no personality">🙂<span>NORMAL</span></button>
+    </div>
+    <div class="hint" id="mode-hint">Or say "Karen, work mode" / "both mode" / "love mode".</div>
+  </div>
+  <div class="field">
+    <label>AVATAR</label>
+    <select id="set-avatar"></select>
+    <div class="hint">The character shown in avatar mode (the person button in the dock).</div>
+  </div>
+  <div class="field">
+    <label class="toggle">Interface sounds <input type="checkbox" id="set-sounds" checked></label>
+  </div>
+  <div class="field">
+    <label class="toggle">Face unlock <input type="checkbox" id="set-face"></label>
+    <div class="hint" id="face-hint">She starts locked and answers once the webcam sees your face. Say "Karen, lock yourself" to lock.</div>
+  </div>
+  <div class="field">
+    <button class="wide-btn" id="btn-clear">FORGET CONVERSATION</button>
+    <button class="wide-btn" id="btn-log">OPEN LOG FILE</button>
+  </div>
+</aside>
+
+<aside id="spaces">
+  <button class="btn" id="close-spaces" title="Close">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+  <div class="sp-tabs">
+    <button class="on" data-tab="pages">SPACES</button>
+    <button data-tab="dots">DOTS <b id="dots-count"></b></button>
+  </div>
+
+  <section class="sp-tab on" id="tab-pages">
+    <div class="sp-side">
+      <input id="sp-search" placeholder="Search pages" autocomplete="off">
+      <button class="wide-btn" id="sp-new">+ NEW PAGE</button>
+      <div id="sp-tree"></div>
+    </div>
+    <div class="sp-main">
+      <div class="sp-head">
+        <h3 id="sp-title">No page open</h3>
+        <span id="sp-status"></span>
+        <div class="sp-actions">
+          <button id="sp-edit" disabled>EDIT</button>
+          <button id="sp-save" disabled>SAVE</button>
+          <button id="sp-trash" disabled title="Move to the Spaces trash">TRASH</button>
+        </div>
+      </div>
+      <article id="sp-view" class="md"><p class="hint">Pages your Dots write appear here. Try: “Karen, ask the researcher to compare two phones and save it.”</p></article>
+      <textarea id="sp-editor" spellcheck="false"></textarea>
+      <div class="sp-ask">
+        <select id="sp-ask-dot"></select>
+        <input id="sp-ask-text" placeholder="Ask a Dot about this page…" autocomplete="off">
+        <button id="sp-ask-go">ASK</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="sp-tab" id="tab-dots">
+    <div class="sp-side">
+      <div id="dot-list"></div>
+      <button class="wide-btn" id="dot-new">+ NEW DOT</button>
+    </div>
+    <div class="sp-main">
+      <form id="dot-form" autocomplete="off">
+        <div class="field"><label>NAME</label><input name="name" required maxlength="40"></div>
+        <div class="field"><label>ROLE</label><input name="role" placeholder="researches topics on the web…"></div>
+        <div class="field"><label>INSTRUCTIONS</label><textarea name="instructions" rows="3"></textarea></div>
+        <div class="row2">
+          <div class="field"><label>ABILITIES</label><select name="abilities"></select></div>
+          <div class="field"><label>SAVES TO SPACE</label><input name="space"></div>
+        </div>
+        <div class="field"><label class="toggle">Private (tool data only to zero-retention AI) <input type="checkbox" name="private"></label></div>
+        <div class="row2"><button class="wide-btn" type="submit">SAVE DOT</button><button class="wide-btn danger" type="button" id="dot-delete">REMOVE</button></div>
+      </form>
+      <h4>WORKING NOW &amp; RECENT</h4>
+      <div id="dot-runs"></div>
+      <h4>SCHEDULED</h4>
+      <div id="dot-jobs"></div>
+      <p class="hint">Schedule by voice: “Karen, have the researcher collect AI news every weekday at 8 am.”</p>
+    </div>
+  </section>
+</aside>
+
+<div id="confirm">
+  <h3>CONFIRM ACTION</h3>
+  <p id="confirm-text"></p>
+  <div class="row"><button class="yes" id="confirm-yes">YES</button><button class="no" id="confirm-no">NO</button></div>
+  <small>or say “yes” / “no”</small>
+</div>
+<div id="toasts"></div>
+
+<script src="app.js"></script>
+<script src="spaces.js"></script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/",
+               "@pixiv/three-vrm": "./vendor/three-vrm.module.min.js" } }
+</script>
+<script type="module" src="avatar.js"></script>
+</body>
+</html>

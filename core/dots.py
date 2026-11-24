@@ -145,12 +145,12 @@ def _record(run):
 
 
 # ---------------------------------------------------------------- running
-PROMPT = ("You are {name}, one of the user's specialist helpers inside their assistant Karen. You {role}. {instructions} "
-          "Work on the task with your tools, without asking them questions: at most 3 web searches or page reads, then "
+PROMPT = ("You are {name}, one of the user's specialist helpers inside his assistant Karen. You {role}. {instructions} "
+          "Work on the task with your tools, without asking him questions: at most 3 web searches or page reads, then "
           "write. Keep anything worth keeping "
-          "as a Markdown page with dots__save_page, in the '{space}' space unless they named another, with headings "
-          "and source links. Your final message is read aloud to them: one or two plain sentences (no markdown), "
-          "calling them 'you', saying what you did and the page name.")
+          "as a Markdown page with dots__save_page, in the '{space}' space unless he named another, with headings "
+          "and source links. Your final message is read aloud to him: one or two plain sentences (no markdown), "
+          "calling him 'you', saying what you did and the page name.")
 
 
 class Runner:
@@ -167,16 +167,18 @@ class Runner:
         self.lock = threading.Lock()
 
     def brain(self, dot):
-        from core.brain import Brain
+        from core.brain import Brain, private_backends
         key = dot["name"]
         b = self.brains.get(key)
         sig = json.dumps(dot, sort_keys=True)
         if not b or b.sig != sig:  # created, or its settings changed
             llm = self.cfg["llm"]
-            private = llm.get("private_backends", ()) if dot.get("private", True) else ()
+            # private_backends() adds Groq (Zero Data Retention): the raw list was only OpenRouter, so with no
+            # OpenRouter credits every private Dot failed (found 2026-11-08)
+            private = private_backends(llm) if dot.get("private", True) else ()
             b = Brain(llm["backends"], PROMPT.format(**{"space": "Inbox", **dot}), max_tokens=2000, history_turns=4,
                       private=private, max_rounds=8)
-            b.use_persona, b.sig = False, sig
+            b.use_persona, b.sig, b.patience = False, sig, 30  # background work: wait out a short rate limit
             self.brains[key] = b
         return b
 
@@ -206,7 +208,7 @@ class Runner:
             if self.tools.needs_confirm(name):
                 ask = None if scheduled else self.confirm
                 if not ask:
-                    return "Not done: this needs the user's OK and they aren't here. Tell them to ask you directly."
+                    return "Not done: this needs the user's OK and he isn't here. Tell him to ask you directly."
                 if not ask(dot["name"], short, args, run["origin"]):
                     return "The user said no, so nothing was done. Don't retry; mention it in your final message."
             result = self.tools.call(name, args)

@@ -267,7 +267,7 @@ def text_tool(action: str) -> str:
     return f"Done: the {a} version of your text is on the clipboard."
 
 
-SHORTENERS = ["https://tinyurl.com/api-create.php?url=",  # free, no account; is.gd timed out on their network
+SHORTENERS = ["https://tinyurl.com/api-create.php?url=",  # free, no account; is.gd timed out on his network
               "https://is.gd/create.php?format=simple&url="]
 
 
@@ -289,7 +289,7 @@ def shorten_url(url: str) -> str:
 
 
 # ---------------------------------------------------------------- batch 2: files & PDF power tools
-# Same safety as Karen's files server: only their user folders and uploads (its resolve()); outputs to Documents/Karen.
+# Same safety as Karen's files server: only his user folders and uploads (its resolve()); outputs to Documents/Karen.
 import hashlib  # noqa: E402
 import importlib.util  # noqa: E402
 import re  # noqa: E402
@@ -334,7 +334,7 @@ def pdf_lock(path: str, password: str) -> str:
 @mcp.tool()
 @guarded
 def pdf_unlock(path: str, password: str) -> str:
-    """Remove the password from a PDF they own (needs the right password). Saves an unlocked copy."""
+    """Remove the password from a PDF he owns (needs the right password). Saves an unlocked copy."""
     from pypdf import PdfReader, PdfWriter
     full = resolve(path)
     reader = PdfReader(full)
@@ -405,7 +405,7 @@ def _watermark_pdf(text, width, height):
 @mcp.tool()
 @guarded
 def pdf_watermark(path: str, text: str = "CONFIDENTIAL") -> str:
-    """Stamp faint diagonal text (e.g. CONFIDENTIAL, DRAFT, their name) across every page of a PDF. Saves a copy."""
+    """Stamp faint diagonal text (e.g. CONFIDENTIAL, DRAFT, his name) across every page of a PDF. Saves a copy."""
     from pypdf import PdfReader, PdfWriter
     full, reader = _pdf(path)
     w = PdfWriter(clone_from=reader)
@@ -501,7 +501,7 @@ def find_duplicates(folder: str) -> str:
     lines = [f"{len(groups)} sets of duplicates, {size(waste)} wasted. Biggest:"]
     for s, g in groups[:8]:
         lines.append(f"- {size(s)} x{len(g)}: " + " | ".join(os.path.relpath(p, root) for p in g[:3]))
-    return "\n".join(lines) + "\n(Karen's delete_file moves one to the Recycle Bin if they ask.)"
+    return "\n".join(lines) + "\n(Karen's delete_file moves one to the Recycle Bin if he asks.)"
 
 
 @mcp.tool()
@@ -546,7 +546,7 @@ def _tidy_plan(root):
 @guarded
 def tidy_folder(folder: str) -> str:
     """Preview tidying a messy folder (e.g. Downloads, Desktop): which files would move into Images, Documents,
-    Videos, Music, Archives, Installers, Code, Others. Moves nothing; tidy_folder_apply does it after they agree."""
+    Videos, Music, Archives, Installers, Code, Others. Moves nothing; tidy_folder_apply does it after he agrees."""
     root = resolve(folder)
     plan = _tidy_plan(root)
     if not plan:
@@ -575,7 +575,7 @@ def tidy_folder_apply(folder: str) -> str:
         shutil.move(src, dst)
         log.append({"from": src, "to": dst})
         moved += 1
-    save(os.path.join(DATA, "last_tidy.json"), log)  # so it can be undone by hand if they want
+    save(os.path.join(DATA, "last_tidy.json"), log)  # so it can be undone by hand if he wants
     return f"Moved {moved} files into type folders in {root}. (A list of every move is in data/last_tidy.json.)"
 
 
@@ -597,7 +597,7 @@ def _rename_plan(root, find, replace, prefix, numbering):
 @guarded
 def batch_rename(folder: str, find: str = "", replace: str = "", prefix: str = "", numbering: bool = False) -> str:
     """Preview renaming all files in a folder: replace text, add a prefix, and/or number them. Renames nothing;
-    batch_rename_apply does it after they agree."""
+    batch_rename_apply does it after he agrees."""
     plan = _rename_plan(resolve(folder), find, replace, prefix, numbering)
     if not plan:
         return "Nothing would change."
@@ -655,9 +655,7 @@ def convert_audio(path: str, to: str = "mp3") -> str:
     to = to.lower().lstrip(".")
     if to not in ("mp3", "wav", "m4a", "ogg", "flac"):
         return "Formats: mp3, wav, m4a, ogg, flac."
-    exe = shutil.which("ffmpeg")
-    if not exe:
-        return "ffmpeg isn't installed (winget install Gyan.FFmpeg)."
+    exe = _ffmpeg()
     out = out_path(os.path.basename(full), "." + to)
     r = subprocess.run([exe, "-hide_banner", "-loglevel", "error", "-i", full, "-vn", out],  # fixed args, no shell
                        capture_output=True, text=True, timeout=600, creationflags=0x08000000)
@@ -676,7 +674,7 @@ SPOKEN = {"spanish": ("es", "ef_dora"), "french": ("fr-fr", "ff_siwis"), "hindi"
 @mcp.tool()
 def speak_translation(language: str, text: str) -> str:
     """ALWAYS call this for any translation or "how do you say X in <language>" request: Karen's normal voice can
-    only speak English, so this is the only way they hear it pronounced. Translate it yourself first and pass the
+    only speak English, so this is the only way he hears it pronounced. Translate it yourself first and pass the
     translated text in that language's own script (Hindi in Devanagari, Chinese in characters).
     Spoken: Spanish, French, Hindi, Italian, Portuguese, Chinese."""
     lang = SPOKEN.get(language.strip().lower().split()[0])
@@ -689,12 +687,25 @@ def speak_translation(language: str, text: str) -> str:
 
 REC_DIR = os.path.join(OUT, "Recordings")
 recordings = {}  # "voice" / "screen" -> (process, path, started)
+REC_STATE = os.path.join(ROOT, "data", "recording.json")  # Karen Island shows a red dot and the time while this lists one
+
+
+def _mark():
+    try:
+        with open(REC_STATE, "w", encoding="utf-8") as f:
+            json.dump({k: s for k, (p, _, s) in recordings.items() if p.poll() is None}, f)
+    except OSError:
+        pass
 
 
 def _ffmpeg():
     exe = shutil.which("ffmpeg")
     if not exe:
-        raise ValueError("ffmpeg isn't installed (winget install Gyan.FFmpeg).")
+        try:  # the always-on PC (karen-server kit) has no ffmpeg install: imageio-ffmpeg carries its own
+            import imageio_ffmpeg
+            exe = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            raise ValueError("ffmpeg isn't installed (winget install Gyan.FFmpeg).") from None
     return exe
 
 
@@ -706,6 +717,22 @@ def _mic_name():
     if not names:
         raise ValueError("No microphone found.")
     return names[0]
+
+
+def _cam_name():
+    """The first DirectShow camera (the laptop's webcam)."""
+    r = subprocess.run([_ffmpeg(), "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=0x08000000)
+    names = re.findall(r'"([^"]+)" \(video\)', r.stderr)
+    if not names:
+        raise ValueError("No camera found.")
+    return names[0]
+
+
+# "Say stop recording when you're done" was read by the model as an order: it called stop_recording in the same turn
+# and saved a 0-second file (2026-11-03). The result now tells it plainly to leave the recording running.
+STARTED = ("Recording {what} now. It keeps running in the background: do NOT call stop_recording now; only when he "
+           "later asks to stop. Tell him briefly it's recording and that he can say stop recording when he's done.")
 
 
 def _start(kind, name, args, ext):
@@ -722,25 +749,30 @@ def _start(kind, name, args, ext):
                             stdin=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=0x08000000)
     time.sleep(1.5)
     if proc.poll() is not None:
-        return f"The recorder didn't start: {proc.stderr.read().decode(errors='replace').strip()[:200]}"
+        why = proc.stderr.read().decode(errors="replace").strip()
+        if kind == "camera" and re.search(r"Could not run graph|I/O error|busy|in use", why, re.I):
+            return ("The camera is busy: the Camera app or Karen's look is using it. Close the Camera app (or say "
+                    "camera off) and ask again.")
+        return f"The recorder didn't start: {why[:200]}"
     recordings[kind] = (proc, path, time.time())
+    _mark()
     return None
 
 
 @mcp.tool()
 @guarded
 def start_voice_recording(name: str = "") -> str:
-    """Record the microphone (a voice memo, a lecture, a meeting) until they say stop recording. Max 2 hours."""
+    """Record the microphone (a voice memo, a lecture, a meeting) until he says stop recording. Max 2 hours."""
     mic = _mic_name()
     err = _start("voice", name, ["-f", "dshow", "-i", f"audio={mic}", "-t", "7200", "-ac", "1",
                                  "-c:a", "aac", "-b:a", "96k"], ".m4a")
-    return err or "Recording your voice now. Say stop recording when you're done."
+    return err or STARTED.format(what="your voice")
 
 
 @mcp.tool()
 @guarded
 def start_screen_recording(with_mic: bool = False, name: str = "") -> str:
-    """Record the whole screen to an MP4 video (15 fps), optionally with the microphone, until they say stop
+    """Record the whole screen to an MP4 video (15 fps), optionally with the microphone, until he says stop
     recording. Max 1 hour."""
     audio = ["-f", "dshow", "-i", f"audio={_mic_name()}"] if with_mic else []
     err = _start("screen", name, ["-f", "gdigrab", "-framerate", "15", "-draw_mouse", "1", "-i", "desktop", *audio,
@@ -748,15 +780,47 @@ def start_screen_recording(with_mic: bool = False, name: str = "") -> str:
                                   "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                                   *(["-c:a", "aac", "-b:a", "96k"] if with_mic else []),
                                   "-movflags", "+frag_keyframe+empty_moov"], ".mp4")  # playable even if cut off
-    return err or "Recording the screen now. Say stop recording when you're done."
+    return err or STARTED.format(what="the screen")
+
+
+@mcp.tool()
+@guarded
+def start_camera_recording(with_mic: bool = True, name: str = "") -> str:
+    """Record a VIDEO from the webcam (him, a demo, a video message), with the microphone, until he says stop
+    recording. Use for "start a video", "record a video of me", "start vid". Max 1 hour."""
+    inp = f"video={_cam_name()}" + (f":audio={_mic_name()}" if with_mic else "")
+    err = _start("camera", name, ["-f", "dshow", "-rtbufsize", "256M", "-i", inp, "-t", "3600",
+                                  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-pix_fmt", "yuv420p",
+                                  *(["-c:a", "aac", "-b:a", "96k"] if with_mic else []),
+                                  "-movflags", "+frag_keyframe+empty_moov"], ".mp4")  # playable even if cut off
+    return err or STARTED.format(what="a video from the webcam")
+
+
+@mcp.tool()
+@guarded
+def open_camera() -> str:
+    """Open the Windows Camera app so he can see himself or take photos/videos there himself ("open cam", "open the
+    camera"). Not for questions about what the camera sees (that is look)."""
+    if "camera" in recordings and recordings["camera"][0].poll() is None:
+        return "The webcam is recording a video right now; say stop recording first."
+    os.startfile("microsoft.windows.camera:")
+    return "Opened the Camera app."
 
 
 @mcp.tool()
 @guarded
 def stop_recording(kind: str = "all") -> str:
-    """Stop the voice and/or screen recording (kind: voice, screen or all) and show the file."""
+    """Stop the voice, screen and/or camera video recording (kind: voice, screen, camera or all) and show the file. ONLY
+    when he asks to stop recording, never right after starting one."""
+    keys = [kind] if kind in ("voice", "screen", "camera") else ["voice", "screen", "camera"]
+    if any(k in recordings and time.time() - recordings[k][2] < 6 for k in keys):  # the same turn as the start
+        return "The recording only just started and keeps running. Don't stop it; tell him it's recording."
+    return _stop(keys)
+
+
+def _stop(keys):
     done = []
-    for k in ([kind] if kind in ("voice", "screen") else ["voice", "screen"]):
+    for k in keys:
         if k not in recordings:
             continue
         proc, path, started = recordings.pop(k)
@@ -771,12 +835,14 @@ def stop_recording(kind: str = "all") -> str:
             mins, secs = divmod(int(time.time() - started), 60)
             done.append(f"Saved the {k} recording ({mins} min {secs} s, {size(os.path.getsize(path))}) "
                         f"as {path}.\n[[show: {path}]]")
+    _mark()
     return "\n".join(done) or "Nothing is being recorded."
 
 
 import atexit  # noqa: E402
 
-atexit.register(lambda: stop_recording("all"))  # Karen closing finishes the files instead of leaving ffmpeg running
+_mark()  # a fresh server records nothing (an old file from a crash would leave the island's red dot on)
+atexit.register(lambda: _stop(["voice", "screen", "camera"]))  # Karen closing finishes the files instead of leaving ffmpeg running
 
 
 @mcp.tool()

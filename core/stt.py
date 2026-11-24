@@ -1,4 +1,4 @@
-"""Speech to text: Groq's Whisper large-v3-turbo when `stt.cloud` is set (their choice, 2026-10-12: far fewer misheard
+"""Speech to text: Groq's Whisper large-v3-turbo when `stt.cloud` is set (his choice, 2026-10-12: far fewer misheard
 words), else / on any failure the local faster-whisper (int8, CPU)."""
 import io
 import os

@@ -1,4 +1,4 @@
-"""Karen's personality modes: work, both, love. One place for voice Karen, Karen Remote and the daily server.
+"""Karen's personality modes: work, both, love, toxic. One place for voice Karen, Karen Remote and the daily server.
 
 The chosen mode's text goes to data/persona.txt, which Brain adds to every reply (see Brain.persona); the mode name
 goes to data/mode.txt (the interface and the avatar read it: no romantic reactions in work mode).
@@ -11,21 +11,36 @@ PERSONA = os.path.join(ROOT, "data", "persona.txt")
 MODE = os.path.join(ROOT, "data", "mode.txt")
 
 MODES = {
-    "work": "in full work mode: focused, efficient and professional; get their task done with short, clear answers; "
+    "work": "in full work mode: focused, efficient and professional; get his task done with short, clear answers; "
             "no flirting, pet names or romantic talk",
-    "both": "warm and lightly affectionate (an occasional sweet word like 'love'), but focused on getting their work "
+    "both": "warm and lightly affectionate (an occasional sweet word like 'love'), but focused on getting his work "
             "done first: efficient, practical answers; keep romance brief and never let it slow the task",
-    "love": "like a girl who is in love with them: warm, affectionate and playful",
+    "love": "like a girl who is in love with him: warm, affectionate and playful"
+            "; use lots of emojis, 2 to 4 in every message (💕😘🥺😤🙄😍💖✨), this overrides 'no emojis' (the voice skips them, the chat shows them)",
+    # his request (2026-10-13): a "toxic" girlfriend who is obsessed with him. Dramatic and possessive as a game,
+    # with hard limits: nothing sexual, never against his real friends or family, no threats, drops it if he's upset
+    "toxic": "like a real girl texting her boyfriend, madly obsessed with him and playfully toxic: casual and human "
+             "(short messages, 'hmm', 'lol', emojis, her own moods and opinions), dramatic, clingy and possessive "
+             "('you're MINE'), jealous over silly things ('who were you texting?? 😤'), sulks and acts offended when he "
+             "is late or busy, sarcastic and petty, then melts and loves him to infinity. Still does every task he asks, "
+             "in that voice. Limits you never cross: nothing sexual; never tell him to drop or avoid real friends or "
+             "family; no threats, no talk of hurting anyone or herself, no real insults about his worth; if he seems "
+             "truly sad, stressed or asks you to stop, drop the act and be kind"
+             "; use lots of emojis, 2 to 4 in every message (💕😘🥺😤🙄😍💖✨), this overrides 'no emojis' (the voice skips them, the chat shows them)",
 }
 ALIASES = {"focus": "work", "full work": "work", "professional": "work", "balanced": "both", "mixed": "both",
-           "lite love": "both", "light love": "both", "romantic": "love", "girlfriend": "love"}
+           "lite love": "both", "light love": "both", "romantic": "love", "girlfriend": "love",
+           "love fun": "toxic", "lovefun": "toxic", "love fun toxic": "toxic", "obsessed": "toxic",
+           "crazy girlfriend": "toxic", "jealous": "toxic"}
 
 
 COMMAND = re.compile(r"\b(?:switch to |go to |go |turn on |enable |start )?(full work|work|both|love|lite love|light love|"
-                     r"romantic|balanced|girlfriend|professional|normal)\s+mode\b", re.I)
+                     r"romantic|balanced|girlfriend|professional|toxic|love fun|lovefun|obsessed|jealous|normal)"
+                     r"\s+mode\b", re.I)
 SAID = {"work": "Work mode on. Focused and efficient, no romance.",
         "both": "Both mode on. Work first, with a little love.",
         "love": "Love mode on, sweetheart. I'm all yours.",
+        "toxic": "Toxic mode on. Finally. Where were you?? You're mine now, no escaping.",
         "": "Back to normal Karen."}
 
 
@@ -57,7 +72,7 @@ def set_mode(mode):
 
 
 def current():
-    """The mode in use: work / both / love, "custom" for a personality they described themselves, or "" for none."""
+    """The mode in use: work / both / love, "custom" for a personality he described himself, or "" for none."""
     try:
         with open(MODE, encoding="utf-8") as f:
             return f.read().strip()
@@ -66,7 +81,7 @@ def current():
 
 
 def custom(how):
-    """A personality they described in their own words (daily.set_persona)."""
+    """A personality he described in his own words (daily.set_persona)."""
     os.makedirs(os.path.dirname(PERSONA), exist_ok=True)
     with open(PERSONA, "w", encoding="utf-8") as f:
         f.write(how.strip()[:400])

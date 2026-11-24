@@ -28,6 +28,7 @@ class Speaker:
         self.level = 0.0       # loudness of what is playing now, for the UI
         self.on_start = None   # optional callback when sound starts
         self.first_audio = None
+        self.volume = lambda: 1.0  # main sets this: quieter at night (night mode)
 
     def synth(self, text):
         if text in self.cache:
@@ -44,6 +45,7 @@ class Speaker:
         """One line in another language and voice (translations). No clean(): it would strip non-Latin script."""
         self.stop_event.clear()
         samples, _ = self.kokoro.create(text, voice=voice, speed=self.speed, lang=lang)
+        samples = samples * self.volume()
         with sd.OutputStream(samplerate=24000, channels=1, dtype="float32", device=self.device) as out:
             for i in range(0, len(samples), 2400):
                 if self.stop_event.is_set():
@@ -58,7 +60,7 @@ class Speaker:
         """A short soft two-note "I'm listening" sound, instead of saying "Yes?"."""
         t = np.arange(int(24000 * 0.09)) / 24000
         fade = np.minimum(1, np.minimum(t, t[::-1]) / 0.01)  # 10 ms fades, no clicks
-        notes = [0.12 * np.sin(2 * np.pi * f * t) * fade for f in (880, 1320)]
+        notes = [0.12 * self.volume() * np.sin(2 * np.pi * f * t) * fade for f in (880, 1320)]
         sd.play(np.concatenate(notes).astype(np.float32), 24000, device=self.device, blocking=True)
 
     def speak_stream(self, chunks):
@@ -96,6 +98,7 @@ class Speaker:
                 audio_q.put(None)
 
         threading.Thread(target=produce, daemon=True).start()
+        gain = self.volume()
         with sd.OutputStream(samplerate=24000, channels=1, dtype="float32", device=self.device) as out:
             while (samples := audio_q.get()) is not None:
                 if not self.first_audio:
@@ -105,9 +108,9 @@ class Speaker:
                 for i in range(0, len(samples), 2400):  # 100 ms blocks so stop is quick
                     if self.stop_event.is_set():
                         break
-                    block = samples[i:i + 2400]
+                    block = samples[i:i + 2400] * gain
                     self.level = float(np.sqrt(np.mean(block ** 2)))
-                    out.write(block.reshape(-1, 1))
+                    out.write(block.reshape(-1, 1).astype(np.float32))
             self.level = 0.0
             if not self.stop_event.is_set():
                 out.write(np.zeros((4800, 1), dtype=np.float32))  # let the tail play out

@@ -317,12 +317,12 @@ function pick(kind) {
   return have[0];
 }
 
-/* A dance or catwalk they asked for: keeps playing (even while she talks, the mouth still moves) until it times
-   out or they say stop. */
+/* A dance or catwalk he asked for: keeps playing (even while she talks, the mouth still moves) until it times
+   out or he says stop. */
 async function show(kind, seconds = 25) {
   const asked = (A.showAsk = (A.showAsk || 0) + 1);
   const name = await ensure(kind);
-  if (!name || asked !== A.showAsk) return false;  // nothing to play, or they asked for something else meanwhile
+  if (!name || asked !== A.showAsk) return false;  // nothing to play, or he asked for something else meanwhile
   A.showName = name;
   A.showUntil = A.t + seconds;
   A.oneShotUntil = 0;
@@ -529,7 +529,7 @@ function hook() {
   wrap("level", (mic, voice) => { A.voice = voice || 0; });
   wrap("message", (role, text) => {
     text = text || "";
-    if (role === "you") {  // their request, spoken or typed
+    if (role === "you") {  // his request, spoken or typed
       if (/\bstop (dancing|it|that|walking)\b|\benough dancing\b/i.test(text)) { A.showUntil = 0; A.showAsk++; }
       else if (/\b(dance|dancing|show me (your|some) moves)\b/i.test(text)) show("dance");
       else if (/\b(cat ?walk|model walk|walk like a model|ramp walk)\b/i.test(text)) show("catwalk", 15);

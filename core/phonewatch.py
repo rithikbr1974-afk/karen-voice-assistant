@@ -9,6 +9,8 @@ import subprocess
 import threading
 import time
 
+from core import adbguard
+
 OTP = re.compile(r"\b(otp|one.time|verification|code is|passcode|password|cvv|\d{4,8} is your)\b", re.I)
 PICK = re.compile(r"\b(pick (it )?up|answer( it| the call)?|accept|take (it|the call))\b", re.I)
 REJECT = re.compile(r"\b(reject|decline|cut (it|the call)|hang up|end (it|the call))\b", re.I)
@@ -21,10 +23,12 @@ def _adb_exe():
 
 
 class PhoneWatch:
-    def __init__(self, cfg, announce, log, device=""):
-        """cfg: config.yaml phone_watch. announce(kind, text): kind "ring" or "message"."""
+    def __init__(self, cfg, announce, log, device="", second=""):
+        """cfg: config.yaml phone_watch. announce(kind, text): kind "ring" or "message".
+        second: the spare-SIM phone's serial (phone.second), never watched."""
         self.cfg, self.announce, self.log = cfg, announce, log
-        self.exe, self.device = _adb_exe(), device
+        self.exe, self.fixed, self.device = _adb_exe(), device, device
+        self.second = [str(s) for s in (second if isinstance(second, list) else [second]) if s]
         self.apps = set(cfg.get("apps", ["com.whatsapp", "com.whatsapp.w4b", "com.google.android.apps.messaging"]))
         self.ringing_since = 0.0
         self.seen = None  # message notifications already known (None until the first look: no flood at start)
@@ -68,7 +72,13 @@ class PhoneWatch:
         n, state = 0, "0"
         while True:
             try:
-                if "\tdevice" not in self.adb("devices"):
+                if not adbguard.background_ok():  # Android Studio is open, or someone stopped adb: stay off it
+                    self.seen = None
+                    time.sleep(10)
+                    continue
+                ready = [d for d in re.findall(r"^(\S+)\tdevice$", self.adb("devices"), re.M) if d not in self.second]
+                self.device = self.fixed or (ready[0] if ready else "")
+                if not ready or (self.fixed and self.fixed not in ready):
                     self.seen = None
                     time.sleep(30)
                     continue

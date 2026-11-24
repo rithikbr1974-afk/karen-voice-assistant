@@ -30,23 +30,51 @@ class Tools:
         self.tools = {}    # "server__tool" -> {"server", "name", "schema", "group"}
         self.clients = {}
         self.on_change = None  # called when a server finishes starting
-        self.specs = {n: s for n, s in (servers or {}).items() if s.get("enabled", True)}  # setup.py turns them on/off
+        self.specs = servers or {}
         for name, spec in self.specs.items():
             self.status[name] = "starting"
             asyncio.run_coroutine_threadsafe(self._serve(name, spec), self.loop)
 
     # ------------------------------------------------------------- servers
     async def _serve(self, name, spec):
+        """Start a server and keep it alive. A failed start (no internet yet at sign-in: uvx couldn't reach PyPI, so
+        Gmail stayed off all day, 2026-10-23..25) or a later crash is retried after 30 s, 60 s, 2 min, then every 5 min."""
+        delay = 30
+        # uvx servers start from uv's cache first (UV_OFFLINE): PyPI's DNS failed for 20 min after sign-in on
+        # 2026-10-26 while Telegram already worked. If the cache was cleaned, the online try follows at once.
+        offline = spec["command"] == "uvx"
+        while True:
+            if await self._serve_once(name, spec, offline) == "setup":
+                return  # keys missing in .env: retrying can't help
+            for key in [k for k, t in self.tools.items() if t["server"] == name]:
+                del self.tools[key]
+            self.clients.pop(name, None)
+            if offline:
+                offline = False
+                self.log("tools", f"{name}: trying again online")
+            else:
+                offline = spec["command"] == "uvx"
+                self.log("tools", f"{name}: trying again in {delay} s")
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 300)
+            self.status[name] = "starting"
+            self._changed()
+
+    async def _serve_once(self, name, spec, offline=False):
         from mcp import Client, StdioServerParameters, stdio_client
         env = {k: os.path.expandvars(str(v)) for k, v in (spec.get("env") or {}).items()}
         missing = [k for k, v in env.items() if "$" in v or not v]
         env.setdefault("PYTHONUTF8", "1")  # Windows' default cp1252 crashed workspace-mcp's logging on "✓"
         env.setdefault("PYTHONIOENCODING", "utf-8")
+        env.setdefault("OPENBLAS_NUM_THREADS", os.environ.get("OPENBLAS_NUM_THREADS", "1"))  # numpy: 500 -> 18 MB each
+        env.setdefault("CT2_PACKED_GEMM", os.environ.get("CT2_PACKED_GEMM", "0"))  # local Whisper: 2.3 -> 0.4 GB
+        if offline:
+            env["UV_OFFLINE"] = "1"
         if missing:
             self.status[name] = "setup"
             self.log("tools", f"{name}: not started, set {', '.join(missing)} in .env")
             self._changed()
-            return
+            return "setup"
         command = sys.executable if spec["command"] == "{python}" else spec["command"]  # Karen's own venv
         params = StdioServerParameters(command=command, args=[str(a) for a in spec.get("args", [])], env=env)
         try:
@@ -137,6 +165,19 @@ class Tools:
         if not groups and TASK_START.match(text.strip()):
             groups = {(t["server"], t["group"]) for t in self.tools.values()}  # looks like a task: send all
         return [t["schema"] for t in self.tools.values() if (t["server"], t["group"]) in groups]
+
+    def groups_for(self, text):
+        """The (server, group) pairs whose trigger words appear in text (no waiting, no send-everything fallback).
+        Used on Karen's own question: when she offers "Should I add a reminder to your calendar?" in plain chat, his
+        "yes" / "mm" gets the calendar tools. Without them Gemini answered "I have scheduled a meeting" and nothing
+        was scheduled (2026-11-06)."""
+        words, groups = text.lower(), set()
+        for name, spec in self.specs.items():
+            trig = spec.get("triggers") or []
+            for group, keys in (trig.items() if isinstance(trig, dict) else [("*", trig)]):
+                if any(re.search(rf"\b{re.escape(k)}", words) for k in keys):
+                    groups.add((name, group))
+        return {g for g in groups if any((t["server"], t["group"]) == g for t in self.tools.values())}
 
     def groups_of(self, schemas):
         """The (server, group) pairs of the tool schemas select() returned."""

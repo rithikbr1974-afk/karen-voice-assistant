@@ -80,7 +80,7 @@ def open_project(name: str) -> str:
 @mcp.tool()
 def open_in_editor(file: str, line: int = 0, project: str = "") -> str:
     """Open a file in VS Code at a line (e.g. where an error points). file: a full path, or a file name/relative
-    path that is looked up in their projects (project narrows it)."""
+    path that is looked up in his projects (project narrows it)."""
     path = os.path.expandvars(os.path.expanduser(file.strip().strip('"')))
     if not os.path.isfile(path):
         roots = [find(project)[1]] if project and find(project)[1] else list(projects().values())

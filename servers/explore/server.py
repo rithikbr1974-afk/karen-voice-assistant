@@ -14,6 +14,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -100,7 +101,7 @@ def _vision(jpeg, question):
 @friendly
 def look(question: str = "") -> str:
     """See through the webcam right now and answer about it: what the user is holding, a product, a label, a room.
-    question: what they asked (empty = describe what you see). Every call takes a fresh picture."""
+    question: what he asked (empty = describe what you see). Every call takes a fresh picture."""
     t = time.time()
     shot = _capture()
     if not shot:
@@ -141,7 +142,7 @@ def camera_off() -> str:
 
 # ---------------------------------------------------------------- research mode
 KINDS = {  # specialist sites per kind of topic; {q} is the topic, URL-encoded
-    "product": ["https://www.amazon.com/s?k={q}", "https://www.google.com/search?tbm=shop&q={q}",
+    "product": ["https://www.amazon.in/s?k={q}", "https://www.flipkart.com/search?q={q}",
                 "https://www.youtube.com/results?search_query={q}+review", "https://www.reddit.com/search/?q={q}+review"],
     "design": ["https://www.pinterest.com/search/pins/?q={q}", "https://dribbble.com/search/{q}",
                "https://www.behance.net/search/projects?search={q}", "https://www.google.com/search?tbm=isch&q={q}"],
@@ -224,7 +225,7 @@ def _top_results(topic, n):
 @mcp.tool()
 def research_mode(topic: str, kind: str = "general") -> str:
     """Research mode / power research: open many pages about a topic in several browser windows side by side.
-    Only when they ask for research mode or to open pages; for a report or PDF use research_report alone.
+    Only when he asks for research mode or to open pages; for a report or PDF use research_report alone.
     topic: a short search phrase. kind: product, design, concept (study, science, history), tech (code, software),
     news, or general."""
     exe = _browser()
@@ -273,7 +274,7 @@ IDENTIFY = ("Webcam picture. What product or object is the user showing? Ignore 
 @mcp.tool()
 @friendly
 def research_report(topic: str = "", from_camera: bool = False, from_research: bool = False) -> str:
-    """Make a PDF research report (summary, specs/facts, pros/cons, price, alternatives, verdict, sources,
+    """Make a PDF research report (summary, specs/facts, pros/cons, price in India, alternatives, verdict, sources,
     an online photo) and save it to Documents/Karen/Reports. from_camera=true: identify the product the user is showing
     the webcam first. from_research=true: use the topic and pages of a research mode that is already on. Needs no
     research mode (it searches by itself). Takes about a minute."""
@@ -303,7 +304,7 @@ def research_report(topic: str = "", from_camera: bool = False, from_research: b
         pages = PAGES["pages"]  # a retry (the AI was busy): don't fetch everything again
     else:
         urls = list(LAST["pages"]) if from_research and topic == LAST["topic"] else []
-        query = f"{topic} review specifications price {report.COUNTRY}".strip() if from_camera else topic
+        query = f"{topic} review specifications price India" if from_camera else topic
         urls += [u for u in report.search(query, 8) if u not in urls]
         pages = report.fetch_pages(urls)
         PAGES.update(topic=topic, pages=pages, at=time.time())
@@ -317,7 +318,7 @@ def research_report(topic: str = "", from_camera: bool = False, from_research: b
     log("report", f"{topic}: {len(pages)} sources, {time.time() - t:.0f}s -> {pdf}")
     return (f"Report on {data.get('title') or topic} saved as a PDF in Documents/Karen/Reports: {pdf}\n"
             f"{data.get('spoken', '')}\n"
-            f"(If they ask, it can be emailed as an attachment with that path.)\n[[show: {pdf}]]")
+            f"(If he asks, it can be emailed as an attachment with that path.)\n[[show: {pdf}]]")
 
 
 @mcp.tool()
@@ -416,6 +417,92 @@ def work_mode_off() -> str:
             closed += 1
     name, MODE["name"], MODE["windows"] = MODE["name"], "", []
     return f"{name.capitalize()} mode off: closed {closed} windows." if closed else "No work mode was on."
+
+
+# ---------------------------------------------------------------- pictures (find online or create with AI)
+BLOCKED = re.compile(r"\b(sex|sexy|sexual|nude|nudes|naked|porn|porno|nsfw|erotic|xxx|lust|topless|fetish|hentai|"
+                     r"intercourse|orgasm|genitals?|boobs)\b", re.I)
+PICTURES = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Documents", "Karen", "Pictures")
+
+
+def _images():
+    """ig-reels/images.py: Cloudflare FLUX (CF_ACCOUNT_ID + CF_API_TOKEN in .env), AI Horde, Openverse/Wikimedia."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ig_images", os.path.join(ROOT, "ig-reels", "images.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _web_photo(what, out):
+    """The best real photo from a web image search (ddgs, free): biggest sensible picture that downloads."""
+    import io
+    import httpx
+    import report
+    from ddgs import DDGS
+    from PIL import Image
+    for hit in DDGS(timeout=10).images(what, max_results=20, backend="bing"):
+        url = hit.get("image", "")
+        if not url or any(s in url or s in hit.get("source", "") for s in report.SKIP_IMAGES):
+            continue
+        try:
+            r = httpx.get(url, headers=report.UA, follow_redirects=True, timeout=8)
+            img = Image.open(io.BytesIO(r.content)).convert("RGB")
+        except Exception:
+            continue
+        if min(img.size) >= 400 and 0.4 <= img.width / img.height <= 2.5:
+            img.thumbnail((1600, 1600))
+            img.save(out, quality=92)
+            return hit.get("url") or url
+    return None
+
+
+def _picture_prep(what):
+    if BLOCKED.search(what):
+        return None, "I don't get sexual or explicit pictures. Tell the user that plainly and offer something else."
+    os.makedirs(PICTURES, exist_ok=True)
+    name = "".join(c if c.isalnum() else "-" for c in what.lower())[:40].strip("-") or "picture"
+    return os.path.join(PICTURES, f"{name}-{{kind}}{datetime.datetime.now():%H%M%S}"), None
+
+
+@mcp.tool()
+def find_photo(what: str) -> str:
+    """Find a REAL photo online and send/show it (in Telegram it arrives in the chat). Use for "send me a photo / pic /
+    picture / image of ...", "show me ...": anything that exists (people, places, buildings, products, animals, cars,
+    food, flowers). what: the subject in English, specific (e.g. "Taj Mahal at sunset", "red Ferrari SF90")."""
+    base, refused = _picture_prep(what)
+    if refused:
+        return refused
+    try:
+        out = base.format(kind="") + ".jpg"
+        source = _web_photo(what, out)
+        if not source:  # freely licensed search as a second try
+            meta = _images().search(what, out.replace(".jpg", ".png"))
+            out, source = out.replace(".jpg", ".png"), meta.get("page")
+        log("find_photo", f"'{what}' from {source}")
+        return f"Found a real photo of {what} (from {source}).\n[[show: {out}]]"
+    except Exception as e:
+        log("find_photo", f"'{what}' failed: {e!r}")
+        return f"Couldn't find a photo of {what} right now ({type(e).__name__}). Try different words."
+
+
+@mcp.tool()
+def create_picture(what: str, style: str = "none") -> str:
+    """Make a NEW picture with AI and send/show it. ONLY when the user says draw / generate / create / make / paint /
+    imagine a picture or image, or the subject can't exist (a chocolate dragon). Not for "send me a photo of" (that is
+    find_photo). what: describe the picture in English. style: none (photo-like), flat (vector illustration),
+    sketch (pencil), doodle (stick figures)."""
+    base, refused = _picture_prep(what)
+    if refused:
+        return refused
+    try:
+        out = base.format(kind="ai-") + ".png"
+        meta = _images().generate(what, out, style if style in ("none", "flat", "sketch", "doodle") else "none")
+        log("create_picture", f"'{what}' via {meta.get('provider')}")
+        return f"Made a new picture of {what} with AI ({meta.get('provider')}).\n[[show: {out}]]"
+    except Exception as e:
+        log("create_picture", f"'{what}' failed: {e!r}")
+        return f"Couldn't make that picture right now ({type(e).__name__}). Try again in a bit."
 
 
 if __name__ == "__main__":

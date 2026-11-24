@@ -1,5 +1,5 @@
 """Enroll the user's face for face unlock (core/face.py). Opens the webcam in a window and takes ~30 face samples
-while they turn their head a little. Saves only the face numbers to data/face_profile.npy (no photos).
+while he turns his head a little. Saves only the face numbers to data/face_profile.npy (no photos).
 
     python scripts/enroll_face.py          enroll (replaces the old profile)
     python scripts/enroll_face.py --test   live check: shows the match score for whoever is in front of the camera
@@ -34,8 +34,42 @@ cam = cv2.VideoCapture(camera, cv2.CAP_DSHOW)
 if not cam.isOpened():
     sys.exit("The camera didn't open (is Karen's camera look or another app using it?).")
 
+class Window:
+    """The camera window, drawn with tkinter: Karen's OpenCV is the headless build, which has no cv2.imshow
+    (the first real run, 2026-10-27, crashed there before taking a sample)."""
+
+    def __init__(self, title):
+        import tkinter as tk
+        self.root = tk.Tk()
+        self.root.title(title)
+        self.root.attributes("-topmost", True)  # in front of the terminal and Karen's window
+        self.label = tk.Label(self.root)
+        self.label.pack()
+        self.open = True
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.bind("<Key>", lambda e: self.close() if e.keysym.lower() in ("q", "escape") else None)
+
+    def close(self):
+        self.open = False
+
+    def show(self, bgr):
+        from PIL import Image, ImageTk
+        img = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)))
+        self.label.configure(image=img)
+        self.label.image = img  # keep a reference, or tkinter drops the picture
+        self.root.update()
+        return self.open
+
+    def destroy(self):
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+
+window = Window("Karen face unlock")
 feats, step, last, start = [], 0, 0.0, time.time()
-print("Press Q in the camera window to quit.")
+print("Press Q in the camera window (or close it) to quit.")
 while True:
     ok, frame = cam.read()
     if not ok:
@@ -64,11 +98,10 @@ while True:
                 start = time.time()  # a moment to move between steps
     else:
         cv2.putText(view, "TEST: green = unlocks", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 120, 200), 2)
-    cv2.imshow("Karen face unlock", view)
-    if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+    if not window.show(view):
         break
 cam.release()
-cv2.destroyAllWindows()
+window.destroy()
 
 if not test:
     if len(feats) < len(STEPS) * PER_STEP:
@@ -76,7 +109,7 @@ if not test:
     F = np.array(feats, dtype=np.float32)
     sims = F @ F.T
     np.fill_diagonal(sims, -1)
-    own = sims.max(axis=1)  # each sample against the rest: how surely they match themselves
+    own = sims.max(axis=1)  # each sample against the rest: how surely he matches himself
     os.makedirs("data", exist_ok=True)
     np.save(PROFILE, F)
     print(f"Saved {len(F)} face samples to {PROFILE}.")

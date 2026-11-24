@@ -1,0 +1,181 @@
+/* Aurora: Karen's 2026 look (default). A soft living orb, clean type, quiet glass cards, chat bubbles.
+   Everything is scoped to body.theme-aurora, so the original HUD look ("Classic") is untouched. */
+body.theme-aurora {
+  --bg: #07060d;
+  --text: #eeedf7;
+  --muted: rgba(226, 224, 240, .56);
+  --faint: rgba(226, 224, 240, .34);
+  --glass: rgba(255, 255, 255, .045);
+  --glass-hi: rgba(255, 255, 255, .08);
+  --edge: rgba(255, 255, 255, .09);
+  --primary: #a78bfa;
+  --primary-dim: rgba(167, 139, 250, .5);
+  --magenta: #f472b6;
+  --cyan: #67e8f9;
+  --amber: #fbbf24;
+  --red: #fb7185;
+  --accent: var(--primary);
+  --grad: linear-gradient(120deg, #a78bfa 0%, #f472b6 52%, #67e8f9 100%);
+  --display: "Sora", "Inter", "Segoe UI", sans-serif;
+  --body: "Inter", "Segoe UI", sans-serif;
+  background: var(--bg);
+  font-size: 15px;
+  letter-spacing: -.005em;
+}
+/* drifting aurora light instead of the HUD grid */
+body.theme-aurora::before {
+  background: radial-gradient(40% 35% at 18% 12%, rgba(124, 58, 237, .20), transparent 70%),
+              radial-gradient(35% 30% at 85% 85%, rgba(236, 72, 153, .13), transparent 70%),
+              radial-gradient(30% 28% at 80% 10%, rgba(34, 211, 238, .09), transparent 70%);
+  background-size: auto; mask-image: none; animation: aurora-drift 26s ease-in-out infinite alternate;
+}
+@keyframes aurora-drift { to { transform: translate3d(-2%, 2%, 0) scale(1.06); } }
+
+/* header: wordmark, state pill, status chips */
+body.theme-aurora header { height: 68px; padding: 0 28px; }
+body.theme-aurora .brand { align-items: center; gap: 12px; }
+body.theme-aurora .brand h1 {
+  font-family: var(--display); font-weight: 600; font-size: 23px; letter-spacing: -.01em; text-transform: none;
+  background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none;
+}
+body.theme-aurora .brand .state {
+  font-family: var(--body); font-size: 12px; font-weight: 500; letter-spacing: .02em; text-transform: lowercase;
+  color: var(--text); padding: 5px 11px 5px 24px; border-radius: 999px; background: var(--glass); border: 1px solid var(--edge);
+  position: relative;
+}
+body.theme-aurora .brand .state::first-letter { text-transform: uppercase; }
+body.theme-aurora .brand .state::before {
+  content: ""; position: absolute; left: 10px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 10px var(--accent);
+}
+body.theme-aurora.listening { --accent: var(--cyan); }
+body.theme-aurora.thinking { --accent: var(--magenta); }
+body.theme-aurora.speaking { --accent: var(--primary); }
+body.theme-aurora.confirm { --accent: var(--amber); }
+body.theme-aurora.error { --accent: var(--red); }
+body.theme-aurora .hud { font-family: var(--body); font-size: 12px; letter-spacing: 0; gap: 8px; }
+body.theme-aurora .hud > span:not(#clock):not(#demo-badge) {
+  padding: 5px 10px; border-radius: 999px; background: var(--glass); border: 1px solid var(--edge); color: var(--muted);
+}
+body.theme-aurora .hud .dot { width: 6px; height: 6px; margin-right: 6px; background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+body.theme-aurora .hud .dot.off { background: rgba(255,255,255,.2); box-shadow: none; }
+body.theme-aurora #clock { font-family: var(--display); font-size: 15px; font-weight: 500; margin-left: 6px; }
+body.theme-aurora #demo-badge { border-radius: 999px; font-size: 11px; }
+
+/* cards: flat glass, generous radius, no tilt, no brackets, no float */
+body.theme-aurora .column { top: 88px; bottom: 116px; gap: 14px; perspective: none; }
+body.theme-aurora .column.left { left: 22px; width: 272px; }
+body.theme-aurora .column.right { right: 22px; width: 360px; }
+body.theme-aurora .panel {
+  border-radius: 20px; padding: 16px 18px 14px; background: var(--glass); border: 1px solid var(--edge);
+  backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 10px 40px rgba(0,0,0,.28);
+  animation: none; transform: none !important;
+}
+body.theme-aurora .panel::before, body.theme-aurora .panel::after { display: none; }
+body.theme-aurora .panel:hover { border-color: rgba(255,255,255,.16); box-shadow: 0 10px 40px rgba(0,0,0,.32); }
+body.theme-aurora .panel.warn { border-color: rgba(251,191,36,.6); animation: none; }
+body.theme-aurora .panel.alert { border-color: rgba(251,113,133,.7); animation: none; }
+body.theme-aurora .panel h2 {
+  font-family: var(--body); font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none;
+  color: var(--text); margin-bottom: 12px;
+}
+body.theme-aurora .panel h2 small { font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--faint); }
+body.theme-aurora .stat { grid-template-columns: 64px 1fr 46px; font-size: 13px; }
+body.theme-aurora .stat .label { font-family: var(--body); font-size: 12px; letter-spacing: 0; text-transform: none; }
+body.theme-aurora .stat .value { font-weight: 500; }
+body.theme-aurora .bar { height: 6px; border-radius: 6px; background: rgba(255,255,255,.07); }
+body.theme-aurora .bar i { border-radius: 6px; background: var(--grad); box-shadow: none; }
+body.theme-aurora .bar i.warn { background: var(--amber); }
+body.theme-aurora .bar i.bad { background: var(--red); }
+body.theme-aurora .kv { font-size: 13px; }
+body.theme-aurora .kv b { font-weight: 500; }
+body.theme-aurora .details { font-size: 12px; }
+
+/* conversation as chat bubbles */
+body.theme-aurora #messages { gap: 8px; mask-image: linear-gradient(transparent, #000 8%); }
+body.theme-aurora #messages > :first-child { margin-top: auto; }  /* newest at the bottom, like a chat app */
+body.theme-aurora .msg { max-width: 88%; padding: 9px 13px; border-radius: 16px; font-size: 14px; line-height: 1.45; }
+body.theme-aurora .msg .who { display: none; }
+body.theme-aurora .msg.karen { align-self: flex-start; background: rgba(255,255,255,.06); border: 1px solid var(--edge); border-bottom-left-radius: 6px; }
+body.theme-aurora .msg.you {
+  align-self: flex-end; color: #fff; border-bottom-right-radius: 6px;
+  background: linear-gradient(135deg, rgba(139,92,246,.85), rgba(219,39,119,.75));
+}
+body.theme-aurora .msg.error { align-self: center; background: rgba(251,113,133,.12); color: var(--red); border: 1px solid rgba(251,113,133,.3); }
+body.theme-aurora .msg.system { align-self: center; color: var(--muted); font-size: 12px; padding: 4px 10px; }
+body.theme-aurora .msg .meta { font-size: 11px; color: var(--faint); margin-top: 4px; }
+body.theme-aurora .msg.you .meta { color: rgba(255,255,255,.7); }
+
+/* abilities as a dense list */
+body.theme-aurora .ability .led { background: rgba(255,255,255,.18); }
+body.theme-aurora .ability.on .led { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
+body.theme-aurora .ability.bad .led { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+/* floating dock */
+body.theme-aurora #dock {
+  bottom: 28px; padding: 8px 8px 8px 10px; gap: 8px; border-radius: 999px; width: min(700px, calc(100% - 48px));
+  background: rgba(22, 20, 34, .72); border: 1px solid rgba(255,255,255,.1); backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: 0 18px 60px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+}
+body.theme-aurora #dock input { font-family: var(--body); font-size: 15px; padding: 6px 6px; }
+body.theme-aurora .btn {
+  width: 40px; height: 40px; border: 0; background: transparent; color: var(--muted); transition: background .2s, color .2s, transform .1s;
+}
+body.theme-aurora .btn:hover { background: rgba(255,255,255,.08); color: var(--text); box-shadow: none; }
+body.theme-aurora .btn svg { width: 19px; height: 19px; }
+body.theme-aurora .btn.talk { width: 48px; height: 48px; color: #fff; background: var(--grad); box-shadow: 0 6px 24px rgba(167,139,250,.35); }
+body.theme-aurora .btn.talk:hover { filter: brightness(1.08); }
+body.theme-aurora .btn.talk.live { background: var(--grad); box-shadow: 0 0 0 6px rgba(103,232,249,.18), 0 6px 28px rgba(103,232,249,.45); animation: talk-pulse 1.4s ease-in-out infinite; }
+@keyframes talk-pulse { 50% { box-shadow: 0 0 0 12px rgba(103,232,249,.05), 0 6px 28px rgba(103,232,249,.45); } }
+body.theme-aurora .btn.active { color: var(--amber); }
+body.theme-aurora #btn-send { color: var(--text); background: rgba(255,255,255,.08); }
+body.theme-aurora #btn-avatar.on, body.theme-aurora #btn-avatar.on:hover, body.theme-aurora #btn-study.on { color: #fff; background: rgba(167,139,250,.25); box-shadow: none; }
+
+/* chips, drop zone, toasts */
+body.theme-aurora .chip { border-radius: 999px; background: rgba(22,20,34,.85); border-color: var(--edge); }
+body.theme-aurora #dropzone { font-family: var(--display); letter-spacing: 0; border: 2px dashed var(--primary); background: rgba(7,6,13,.75); border-radius: 24px; inset: 16px; }
+body.theme-aurora .toast { border-radius: 999px; padding: 8px 16px; background: rgba(22,20,34,.92); font-size: 13px; }
+
+/* settings drawer */
+body.theme-aurora #settings { width: 380px; background: rgba(14, 12, 22, .94); border-left: 1px solid var(--edge); }
+body.theme-aurora #settings h2 { font-family: var(--display); font-size: 20px; font-weight: 600; letter-spacing: -.01em; color: var(--text); text-transform: none; }
+body.theme-aurora .panel h2 small, body.theme-aurora #msg-count { text-transform: none; }
+body.theme-aurora .field label { font-family: var(--body); font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: lowercase; color: var(--muted); }
+body.theme-aurora .field label::first-letter { text-transform: uppercase; }
+body.theme-aurora .field select { border-radius: 12px; background: rgba(255,255,255,.05); padding: 9px 10px; }
+body.theme-aurora .wide-btn { border-radius: 12px; font-family: var(--body); font-size: 13px; letter-spacing: 0; background: rgba(255,255,255,.05); }
+body.theme-aurora .mode-buttons { grid-template-columns: repeat(5, 1fr); }
+body.theme-aurora .mode-buttons button { border-radius: 14px; background: rgba(255,255,255,.04); border-color: var(--edge); }
+body.theme-aurora .mode-buttons button span { font-family: var(--body); font-size: 10px; letter-spacing: .02em; text-transform: lowercase; }
+body.theme-aurora .mode-buttons button.on { background: rgba(167,139,250,.22); border-color: rgba(167,139,250,.7); box-shadow: 0 0 0 1px rgba(167,139,250,.3); }
+
+/* confirm card */
+body.theme-aurora #confirm { border-radius: 24px; background: rgba(22,20,34,.9); border: 1px solid rgba(251,191,36,.45); box-shadow: 0 24px 80px rgba(0,0,0,.55); }
+body.theme-aurora #confirm.show { animation: none; }
+body.theme-aurora #confirm h3 { font-family: var(--body); font-size: 12px; letter-spacing: .06em; }
+body.theme-aurora #confirm p { font-size: 19px; line-height: 1.4; }
+body.theme-aurora #confirm button { border-radius: 999px; font-family: var(--body); font-weight: 600; letter-spacing: 0; padding: 10px 32px; }
+body.theme-aurora #confirm .yes { background: var(--amber); color: #1a1205; border-color: var(--amber); }
+
+/* Spaces drawer */
+body.theme-aurora #spaces { background: rgba(14, 12, 22, .96); }
+body.theme-aurora .sp-tabs button, body.theme-aurora .sp-actions button, body.theme-aurora .sp-ask button, body.theme-aurora .job button {
+  border-radius: 999px; font-family: var(--body); font-size: 12px; letter-spacing: 0;
+}
+body.theme-aurora .sp-space { font-family: var(--body); font-size: 11px; letter-spacing: .06em; }
+body.theme-aurora .sp-page, body.theme-aurora .dot-card, body.theme-aurora .run, body.theme-aurora .job { border-radius: 12px; }
+body.theme-aurora .sp-side > input, body.theme-aurora #dot-form input, body.theme-aurora #dot-form textarea,
+body.theme-aurora #dot-form select, body.theme-aurora .sp-ask input, body.theme-aurora .sp-ask select { border-radius: 12px; }
+
+/* look picker (Settings > Look) */
+.theme-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.theme-buttons button {
+  display: flex; flex-direction: column; gap: 6px; align-items: stretch; padding: 8px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--edge); background: rgba(255,255,255,.04); color: var(--text); font-family: var(--body); font-size: 12px;
+}
+.theme-buttons button i { display: block; height: 34px; border-radius: 8px; }
+.theme-buttons button[data-theme=aurora] i { background: radial-gradient(circle at 50% 55%, #fff 0, #a78bfa 22%, #f472b6 45%, transparent 70%), #07060d; }
+.theme-buttons button[data-theme=classic] i { background: radial-gradient(circle at 50% 50%, #c9a7ff 0, #6a2bd9 30%, transparent 60%), repeating-linear-gradient(90deg, rgba(157,78,255,.25) 0 1px, transparent 1px 10px), #05020a; }
+.theme-buttons button.on { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary-dim); }
+
+@media (prefers-reduced-motion: reduce) { body.theme-aurora::before { animation: none; } }

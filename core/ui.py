@@ -7,20 +7,33 @@ import json
 import os
 import threading
 
-STICKY = {"state", "config", "abilities", "muted", "memory", "stats", "attachments"}  # replayed when the page (re)loads
+STICKY = {"state", "config", "abilities", "muted", "memory", "stats", "attachments", "study"}  # replayed when the page (re)loads
+MIRROR = {"message", "state", "done"}  # also shown in the study window: the conversation with Mam
 
 
 class UI:
-    def __init__(self, controls, title="KAREN", hidden=False, characters=None):
+    def __init__(self, controls, title="KAREN", hidden=False, characters=None, island=None):
         import webview
         self.webview = webview
+        self.island = None  # Karen Island (core/island.py): the capsule at the top of the screen
         self.ready = threading.Event()
         self.sticky = {}
         self.viewer = None  # the "Karen Viewer" window, created on first use
+        self.study = None  # study mode's window
+        self.study_thread = []  # what the study window has shown, replayed when it (re)loads
         page = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ui", "index.html")
         link_avatar(os.path.dirname(os.path.abspath(page)), characters)
         self.window = webview.create_window(title, os.path.abspath(page), js_api=controls, width=1280, height=800,
                                             min_size=(900, 600), background_color="#05020a", hidden=hidden)
+        if island and island.get("enabled"):
+            from core.island import Island
+            self.island = Island(webview, controls, island)
+            # with the island on screen she's never listening unseen, so the window's X only hides the window
+            self.window.events.closing += self._hide_instead
+
+    def _hide_instead(self):
+        self.window.hide()
+        return False  # False cancels the close
 
     def call(self, method, *args):
         if method in STICKY:
@@ -30,6 +43,10 @@ class UI:
                 self.window.run_js(f"window.karen && window.karen.{method}(...{json.dumps(args)})")
             except Exception:
                 pass  # window closing
+        if self.island:
+            self.island.event(method, *args)
+        if self.study and method in MIRROR:
+            self.study_call(method, *args)
 
     def show(self, url):
         """Open (or reuse) the "Karen Viewer" window on a URL or file:// address."""
@@ -44,7 +61,50 @@ class UI:
         self.viewer = self.webview.create_window("Karen Viewer", url, width=1100, height=820, background_color="#ffffff")
         self.viewer.events.closed += lambda: setattr(self, "viewer", None)
 
+    def study_window(self, open_it, controls=None):
+        """Study mode's window ("Mam - Study", ui/study.html) docked on the right of the screen, beside Zoom."""
+        if not open_it:
+            self.study_thread = []  # the next study session starts a fresh conversation
+            if self.study:
+                try:
+                    self.study.destroy()
+                except Exception:
+                    pass
+                self.study = None
+            return
+        if self.study:
+            try:
+                self.study.show()
+                self.study.restore()
+                return
+            except Exception:
+                self.study = None  # it was closed
+        self.ready.wait(20)  # at start-up (study mode left on) the page and its local server come up first
+        base = (self.window.get_current_url() or "").rsplit("/", 1)[0]
+        if not base.startswith("http"):
+            return
+        screen = self.webview.screens[0]
+        width = int(screen.width * 0.46)
+        self.study = self.webview.create_window("Mam - Study", f"{base}/study.html", js_api=controls, width=width,
+                                                height=screen.height - 60, x=screen.width - width, y=0,
+                                                min_size=(520, 500), background_color="#000000")
+        self.study.events.closed += lambda: setattr(self, "study", None)
+
+    def study_call(self, method, *args):
+        """window.study.<method>(...) in the study window, if it is open."""
+        if self.study:
+            if method != "state":
+                self.study_thread = (self.study_thread + [[method, list(args)]])[-150:]
+            try:
+                self.study.run_js(f"window.study && window.study.{method}(...{json.dumps(args)})")
+            except Exception:
+                pass
+
     def page_ready(self):
+        if self.island and not self.island.panel:
+            base = (self.window.get_current_url() or "").rsplit("/", 1)[0]
+            if base.startswith("http"):
+                self.island.create_panel(base)
         self.ready.set()
         for method, args in list(self.sticky.items()):
             self.call(method, *args)
@@ -121,3 +181,9 @@ class NullUI:
     def show(self, url):
         import webbrowser
         webbrowser.open(url)
+
+    def study_window(self, open_it, controls=None):
+        pass
+
+    def study_call(self, method, *args):
+        pass

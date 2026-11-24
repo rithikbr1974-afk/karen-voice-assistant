@@ -1,91 +1,144 @@
-# Things you can say
+# Everything Karen can do
 
-Start with **"Karen, …"** (or press Space, or type). Words in *italics* are examples; say anything similar.
-Actions marked 🔒 are read back to you, and nothing happens until you say **yes**.
+About 200 abilities in 13 groups. Karen sends the AI only the tools a request needs, so answers stay fast and cheap.
+Anything that sends, deletes, shuts down or switches a high-power appliance asks **"yes or no?"** first.
 
-## Conversation
-- "Karen, *explain black holes simply*" · "*What's 18% of 2,450?*" · "*Give me a name for my cat*"
-- She remembers the last few turns: "*and in Celsius?*", "*make it shorter*".
-- If she asks you a question, just answer. You don't need to say "Karen" again.
-- Interrupt her by saying "Karen" while she talks.
-- **Personality:** "*work mode*" (focused) · "*both mode*" (friendly) · "*normal mode*" · "*talk to me like a pirate*"
-
-## Everyday
-| Say | |
-|---|---|
-| "What's the weather?" · "Will it rain tomorrow?" | Weather for your city (Open-Meteo, free) |
-| "What's in the news?" · "Latest tech news" | Headlines (Google News) |
-| "Remind me to call Mom at 6 pm" · "Remind me every day at 9 to take my vitamins" | Reminders, spoken and shown when they're due |
-| "Set a timer for 10 minutes" · "Cancel the timer" | Timers |
-| "Remember that my locker code is 2468" · "What's my locker code?" | Her memory |
-| "Add milk to my shopping list" · "What's on my to-do list?" · "Note down…" | To-dos and notes |
-| "Good morning" · "Brief me" | Weather, news, reminders, calendar and new email |
+## Talking with Karen
+- **Wake word:** "Karen", as a personal model trained on your voice. She also has push-to-talk (Space) and typing.
+- **Natural voice:** Kokoro TTS on your PC, in 6 voices (American and British). She starts speaking about 1 second
+  after the AI's first word.
+- **Fast brain with fallback:** Gemini → Groq → OpenRouter. If one is busy, the next answers, and a slow provider is
+  benched for 10 minutes.
+- **Barge-in:** say "Karen" while she talks and she stops and listens.
+- **Follow-ups:** if her answer is a question, she listens for your reply without the wake word.
+- **"Repeat that" / "say it slower"** replay her last answer instantly, without asking the AI again.
+- **Night mode:** from 23:00 to 07:00 she speaks at half volume and gives one- or two-sentence answers.
+- **Other apps' sound dips** while she listens and talks (music won't drown you out), then comes back.
+- **Personality modes:** Normal, Work (focused), Both (work with a little warmth), Love, Toxic (a playful jealous
+  act with hard limits), or Custom ("talk to me like a pirate").
+- **Morning briefing:** the first time each morning, she gives you the weather, news, reminders, calendar and
+  important mail.
 
 ## Your PC
-| Say | |
-|---|---|
-| "Open Spotify" · "Close Chrome" | Apps (anything in your Start menu) |
-| "Volume 30" · "Mute" · "Next song" · "Pause" | Sound and media |
-| "Take a screenshot" · "What's on my screen?" | Screenshot, and a description |
-| "Snap this window left" · "Minimize everything" | Windows |
-| "Click Sign in" · "Play the first song on YouTube Music" | Clicks for you, step by step on screen |
-| "Summarise this page" · "Translate this article" | Reads the page or document in front |
-| "What's wrong with this error?" | Reads the error on screen and explains it |
-| "Find my resume" · "Move it to Documents" · 🔒 "Delete it" | Files (deleted files go to the Recycle Bin) |
-| "Brightness 70" · "Dark mode on" · "Open Bluetooth settings" | Settings |
-| "How much battery?" · "Is my CPU busy?" | System |
-| "Clean up my C drive" 🔒 | Clears temp and cache files |
-| 🔒 "Lock" · "Sleep" · "Shut down" · "Restart" | Power |
-| "Send a WhatsApp to Sam saying I'm late" 🔒 | Through WhatsApp on the PC |
+- **Apps:** open or close any Start-menu app ("open Spotify", "close Chrome").
+- **Sound and media:** volume, mute, play/pause/next.
+- **Web:** open a site in a chosen browser, or search the web.
+- **Windows:** list, focus, minimise, maximise, snap left/right, show the desktop.
+- **Keys and clicks:** shortcuts, "click Save", "read this window" (UI Automation, no screenshots).
+- **Screen agent:** "play the first song on YouTube Music". She looks at the window, then clicks and types step by
+  step. Risky clicks (buy, send, delete) ask first.
+- **Explain this error:** she reads your screen, explains the error and opens the file at the right line in
+  VS Code.
+- **Read this page:** summarise or translate the article or document that's open.
+- **Files:** find, open, create folders, move, rename, copy; delete goes to the Recycle Bin and asks first.
+- **Settings:** brightness, dark mode, Wi-Fi, Bluetooth and display pages.
+- **System:** battery, CPU, RAM and disk; lock, sleep, restart, shut down (asks first).
+- **Clean up the C: drive:** scan for junk (caches, temp files, Recycle Bin), then clean it (asks first).
+- **Clipboard history:** "paste the link I copied earlier". The last 30 items are kept in memory only, and
+  secrets are skipped.
+- **Screenshots**, with an optional description.
+- **WhatsApp (desktop/Web):** read chats, send messages and files (asks first).
+- **Power mode:** hand a bigger task to Open Interpreter, which writes and runs code. She asks before the task and
+  again before every risky step, and every step is logged.
 
-## Files and PDF
-"Convert this to PDF" · "Merge these PDFs" · "Pages 2 to 5 as a new PDF" · "Make this PDF smaller" · "Lock the PDF
-with password …" · "Watermark it CONFIDENTIAL" · "Zip these" · "Unzip this" · "Make a QR code for this link" ·
-"Convert to PNG" · "Extract the audio as MP3" · "Find duplicate files in Downloads" · "Tidy my Downloads" 🔒 ·
-"Rename all photos to Trip 1, 2, 3" 🔒
+## Gmail, Calendar, Drive, Docs, Sheets
+- "Any new emails?", "read the one from my college", "reply saying I'll be there". The reply is read back to you
+  before it's sent.
+- **Organise the inbox:** labels, filters, batch archive (asks first).
+- Calendar: today's agenda, create, move or cancel events.
+- Search Drive, and create or read Google Docs and Sheets.
+- **Gmail → reminders:** on Telegram she suggests reminders from dates in new mail (deadlines, bills); tap ✅ or ❌.
+- Attach Karen's PDF reports to emails.
 
-Drag a file onto the window (or click **+**) and ask about it: "*what's in this?*", "*summarise it*".
-
-## Research and camera
-| Say | |
-|---|---|
-| "What am I holding?" · "Read this label" | Looks through the webcam |
-| "Research mode: best budget phones" | Opens the top sources in tidy browser windows |
-| "Make a research report on *the Pixel 9*" | A PDF with specs, pros and cons, prices and alternatives |
-| "Scan this product and make a report" | Identifies the product on camera, then writes the report |
-| "Coding mode" · "Study mode" · "Chill mode" | Opens your set of apps, sites and music (`config.yaml → explore → modes`) |
+## Everyday life
+- **Weather** (Open-Meteo) and **news** (Google News), both free with no keys.
+- **Reminders and timers:** one-off, daily, or every N minutes within a time window. Spoken, shown as a toast, and
+  sent to your phone.
+- **Memory:** "remember my locker code is 2468", then "what's my locker code?".
+- **To-dos, notes, shopping lists:** shown as a page in Karen's viewer.
+- **Expenses:** "I spent 250 on lunch", "how much did I spend this week?".
+- **Countdowns:** "how many days until my exam?".
+- **Currency:** "50 dollars in rupees" (ECB rates).
+- **YouTube:** "summarise this video" (from its transcript).
+- **Activity report:** "what did I ask you today?".
 
 ## Health and focus
-"Remind me to drink water every hour" · "Eye break every 20 minutes" · "Stop the water reminders" ·
-"Remind me to take my medicine at 9 am and 9 pm" · "Start a pomodoro" · "HIIT workout, 8 rounds" ·
-"What's my BMI? I'm 175 cm, 70 kg" · "How many calories should I eat?" · "I'm feeling stressed today" ·
-"How has my mood been?"
+- Water, eye, stretch and posture reminders; medicine reminders.
+- Pomodoro focus sessions and HIIT workouts with spoken intervals.
+- BMI (including South Asian cut-offs), daily calories, and a mood log with a summary.
 
-## Handy tools
-"Make a strong password" (copied to the clipboard, never shown) · "Count the words I copied" · "Shorten this
-link" · "How do I say *thank you* in French?" (spoken in a French voice) · "Record a voice memo" · "Record my
-screen" · "Stop recording"
+## Camera, research and pictures
+- **"What am I holding?"**: a live webcam look. The camera stays on for 60 s for follow-ups.
+- **Research mode:** opens 3 tiled browser windows with an overview, the top real results and specialist sites.
+  "Research summary" gives you 3 spoken points.
+- **Research reports:** a designed PDF report on any product or topic, built from 6 web sources with facts, pros
+  and cons, prices, alternatives and a verdict. It's ready in about 30 s and can start from the camera ("scan this
+  and make a report").
+- **Photos:** "send me a photo of the Eiffel Tower" finds a real picture. "Draw a cat astronaut" makes one with
+  free AI.
+- **Work modes:** "coding mode" opens VS Code, docs and lo-fi music, tiled. There are also study and chill modes.
 
-## Dots (background helpers) and Spaces (pages)
-"Ask the researcher to compare *three laptops under $800*" · "Every morning, have the writer draft my to-do plan"
-· "Show my pages". Dots work in the background and save Markdown pages you can open in the window.
+## Files and documents
+- Read PDF, Word, Excel, PowerPoint, text and old Office formats; describe images and videos; transcribe audio
+  (up to 60 min).
+- Convert (Office → PDF, images → PDF, PDF → images), merge, split, extract pages, resize.
+- PDF tools: lock and unlock with a password (AES-256), compress, rotate, add a watermark.
+- Zip and unzip, find duplicates, folder sizes, tidy a folder by type, batch rename (previews first, asks to apply).
+- QR codes, image and audio conversion, word counts and text clean-up on the clipboard, a strong password
+  generator, URL shortener.
+- Translate and **say it in that language's voice**: Spanish, French, Hindi, Italian, Portuguese, Chinese.
+- Voice memos and screen recordings, with or without the mic.
+- **Karen's viewer:** any image, PDF, page or report opens in its own window.
 
-## Optional: Gmail and Calendar
-"Any new emails?" · "Read the one from *Amazon*" · "Reply saying *thanks, I'll be there*" 🔒 · "What's on my
-calendar tomorrow?" · "Add a meeting with *Sam* on Friday at 3" 🔒 · "Organise my inbox" 🔒
+## Karen on your phone (Telegram)
+- Chat with the same brain and tools from anywhere, with the same "yes or no?" rules.
+- Send her **anything**:
+  - photos (described)
+  - documents (summarised)
+  - **voice notes** (transcribed, then answered)
+  - videos (frames and sound)
+  - albums (answered once)
+- Proactive messages: due reminders, a **9 pm wrap-up** (tomorrow's calendar, to-dos and important mail), and
+  alerts for low PC battery, a full disk or low phone battery.
+- `/stop` shuts Karen down on the PC remotely; `/status` shows uptime and battery.
+- WhatsApp works too (Meta Cloud API), if you set it up.
 
-## Optional: Android phone
-"Call *Mom*" 🔒 · "Text *Sam*: running late" 🔒 · "Any missed calls?" · "Read my messages" · "Open YouTube on my
-phone" · "What's my phone battery?". When a call comes in, she says who is calling: answer "**pick up**" or
-"**reject**".
+## Your Android phone (adb)
+- Calls (dial, answer, hang up, choose a SIM), call log, read and send SMS, contacts. Calls and SMS ask first, and
+  security codes are hidden.
+- Incoming calls are announced: "Alex is calling. Pick up or reject?" Answer by voice.
+- New WhatsApp/SMS messages are read out (quiet at night).
+- Open apps, read the screen, notifications, screenshots, **find my phone** (it rings loudly).
+- The phone agent taps through any app for you (ARTEMIS, optional).
+- **Phone mirror with hand gestures:** control the phone on your PC screen with your hands.
 
-## Optional: Smart home (Alexa)
-"Turn off the bedroom light" · "Fan on" · "Dim the lamp to 30%" · "Set the AC to 24" 🔒 · "Run good night" 🔒
+## Smart home (Alexa)
+- Lights, fans, plugs and TVs on/off, brightness, status. Alexa routines ("good night").
+- High-power devices (AC, heater, geyser, oven…) ask first.
 
-## Optional: Power mode
-"Power mode: rename all photos in my Downloads by the date they were taken" 🔒 (asks again before each risky step)
+## Developer tools
+- List your projects and open them in VS Code; open a file at a line.
+- git status, log, changes, pull; commit and push (ask first).
 
-## In the window
-**Space**: talk · **mic button**: talk · **+**: add files · **■**: stop talking · **moon**: mute the mic ·
-**person**: avatar mode · **page**: Spaces · **gear**: Settings (voice, speed, brain, wake sensitivity, sounds,
-avatar, mode, face unlock)
+## Dots and Spaces
+- **Dots:** specialist helpers (Researcher, Writer, Coder, Organiser, or your own) that work in the background and
+  on schedules ("every morning at 8, summarise AI news").
+- **Spaces:** Markdown pages Karen and the Dots write and you can read and edit.
+
+## Security and privacy
+- **Face unlock:** she answers only you, re-checks after 30 idle minutes, and "lock yourself" locks her.
+- **Intruder alert:** a stranger's photo is saved and sent to your Telegram.
+- **"Yes or no?"** before every send, delete, shutdown, purchase-like click or high-power appliance.
+- Your data stays in local files. Requests that touch your email, files or camera go only to zero-data-retention
+  AI providers.
+- Never typed into terminals; no shells or registry editor; no arbitrary code except power mode, which asks at
+  every risky step.
+
+## The interface
+- **Aurora look:** a living orb of colour light that changes with her state (violet resting, cyan listening,
+  magenta thinking, pink speaking, amber confirm), glass cards and chat bubbles. There's also a **Classic** HUD
+  look.
+- **Avatar mode:** an anime character with lip-sync, expressions, motion capture, dances, and more characters
+  you can add.
+- Live stats (CPU, RAM, battery), status chips, the abilities panel, drag-and-drop files, a tray icon, start with
+  Windows, and **hand-gesture 3D viewer** for GLB, GLTF, FBX, OBJ, STL and VRM files.

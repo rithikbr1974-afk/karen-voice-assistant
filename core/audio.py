@@ -125,8 +125,10 @@ class Mic:
         self.max_chunks = int(max_utterance_s * RATE) // CHUNK
         self.pre_roll = pre_roll_ms * RATE // 1000 // CHUNK
         self.q = queue.Queue()
+        self.taps = []  # extra listeners on the same stream (the Cortex's ear)
         self.level = 0.0  # peak of the latest chunk, for the UI
         self.interrupt = threading.Event()
+        self.finish = threading.Event()  # the island's ✓: stop listening now and use what was said so far
         self.stream = sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
                                      blocksize=CHUNK, device=device, callback=self._callback)
         self.stream.start()
@@ -135,6 +137,17 @@ class Mic:
         chunk = indata[:, 0].copy()
         self.level = float(np.abs(chunk).max())
         self.q.put(chunk)
+        for tap in self.taps:
+            try:
+                tap.put_nowait(chunk)
+            except queue.Full:
+                pass  # that listener fell behind; the wake word loop never waits for it
+
+    def tap(self):
+        """A second queue that gets every chunk too."""
+        q = queue.Queue(maxsize=500)  # 16 s
+        self.taps.append(q)
+        return q
 
     def flush(self):
         """Drop audio captured while Karen was talking or thinking."""
@@ -154,13 +167,24 @@ class Mic:
             if len(chunk) == CHUNK:
                 return chunk
 
+    def unread(self, chunks):
+        """Put chunks back at the front of the queue: the wake word's voice check reads ~0.6 s past the word, and
+        that audio may be the start of his request."""
+        with self.q.mutex:
+            self.q.queue.extendleft(reversed(chunks))
+            self.q.not_empty.notify()
+
     def listen(self, timeout=None):
         """Block until one utterance is spoken. Returns float32 audio, or None on timeout."""
         start = time.time()
         before, speech, silent, voiced = [], [], 0, 0
+        self.finish.clear()
         while True:
             if self.interrupt.is_set():
                 raise Interrupted
+            if self.finish.is_set():
+                self.finish.clear()
+                return np.concatenate(speech) if speech and voiced >= self.min_chunks else None
             try:
                 chunk = self.q.get(timeout=0.2)
             except queue.Empty:

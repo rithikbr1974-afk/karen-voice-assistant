@@ -44,9 +44,6 @@ def distance(a, b):
     return d[-1]
 
 
-SESSION = "voice_tests/session1"  # recorded by scripts/record_session.py
-
-
 def load(path):
     with wave.open(path) as w:
         return np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
@@ -62,13 +59,13 @@ def main():
                   cloud=cfg["stt"].get("cloud") or {"model": "whisper-large-v3-turbo"})
     else:
         stt = STT(model, cfg["stt"]["compute_type"], threads=cfg["stt"]["threads"])
-    phrases = json.load(open(f"{SESSION}/phrases.json", encoding="utf-8"))
+    phrases = json.load(open("voice_tests/session2/phrases.json", encoding="utf-8"))
     total = {}
     bad = []
     for kind in ("commands", "other"):
         errs = n = 0
         t = time.time()
-        files = sorted(glob.glob(f"{SESSION}/{kind}/*.wav"))
+        files = sorted(glob.glob(f"voice_tests/session2/{kind}/*.wav"))
         for path, ref in zip(files, phrases[kind]):
             if model == "groq":
                 time.sleep(3.2)  # Groq's free speech limit is 20 requests a minute

@@ -20,7 +20,20 @@ import yaml
 from dotenv import load_dotenv
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
+# numpy's OpenBLAS reserves a buffer per CPU thread when it loads: 500 MB of memory in every Python process on this
+# 16-thread i7, 18 MB with one thread (measured 2026-11-08). Karen's heavy maths runs in onnxruntime / CTranslate2
+# with their own threads; numpy only does small jobs. With C: nearly full the page file couldn't grow, and the
+# Cortex failed to start ("mkl_malloc: failed to allocate memory"). Remote imports this file, so it gets it too;
+# core/tools.py passes it to the servers.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+# CTranslate2 (faster-whisper) pre-packs the model for Intel MKL: small.en then commits 2.3 GB instead of 0.4 GB
+# (it touches ~0.7 GB). Same speed without it (2.29 s vs 2.37 s a request), same transcripts. With the packing, a
+# low-memory start either failed ("mkl_malloc") or crashed the whole process with an access violation, no log line
+# (2026-11-08: voice Karen had vanished overnight).
+os.environ.setdefault("CT2_PACKED_GEMM", "0")
 load_dotenv()
+os.environ["PATH"] = os.path.abspath("tools") + os.pathsep + os.environ.get("PATH", "")  # bundled uv/uvx (Google tools)
+os.environ.setdefault("UV_PYTHON_INSTALL_DIR", os.path.abspath(".python"))  # the Python SETUP.bat installed, so uvx starts offline
 os.makedirs("logs", exist_ok=True)
 LOG = open("logs/karen.log", "a", encoding="utf-8", buffering=1)
 if sys.stdout is None:  # started with pythonw (Windows autostart): no console, so keep the output in a file
@@ -32,8 +45,25 @@ YES = re.compile(r"^\W*(yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|send it|con
 
 
 SHOW = re.compile(r"\[\[show:\s*(.+?)\]\]")  # a tool asks Karen to open something in her viewer
+STUDY = re.compile(r"\[\[study:\s*(.+?)\]\]")  # a study tool wrote data/study/<visual|lesson>.json
+# "stop everything": the AI had only *said* "all tasks have been stopped" while meeting notes kept recording (2026-11-03)
+STOP_ALL = re.compile(r"^\W*(karen\W+)?(please\W+)?(stop|end|cancel|turn off)\W+(every\s*thing|it all|all( of it| that)?)"
+                      r"(\W+(please|now|karen))*\W*$", re.I)
 LOCK = re.compile(r"^\W*(karen\W+)?(lock (yourself|karen|up)|lock\W*$|go to lock)", re.I)  # face unlock: lock now
+# "repeat that" / "say it again" / "what did you say" / "pardon": her last answer again, no AI call
+REPEAT = re.compile(r"^\W*(karen\W+)?(can you |could you |please )*(repeat( that| it| please| again| yourself)?( please)?"
+                    r"|say (that|it) again( please)?|what did you (just )?say|come again|pardon( me)?|i didn'?t (get|catch) that"
+                    r")\W*$", re.I)
+# "say it slower" / "slower please" / "repeat that slowly": the same, at 80% speed
+SLOWER = re.compile(r"^\W*(karen\W+)?(can you |could you |please )*((say|repeat) (that|it)( again)? (more )?slow(er|ly)"
+                    r"|(more )?slow(er|ly)( please)?|say (that|it) (again )?(more )?slowly)\W*$", re.I)
+# right after the wake word, Whisper's take on his bare "Karen" (logs 2026-10-27/28): a wake, not a request
+BARE = re.compile(r"^\W*(karen|karan|got (him|it)|get (him|it|in)|gavin|garham)\W*$", re.I)
+MAP = re.compile(r"\[\[map:\s*([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]")  # show_map: embed url|title|link
 SAY = re.compile(r"\[\[say:\s*([^|\]]+)\|([^|\]]+)\|(.+?)\]\]", re.S)  # a translation to speak: lang|voice|text
+# "that wasn't for you": the Cortex learns the last request wasn't meant for her (no AI call)
+NOT_FOR_ME = re.compile(r"^\W*(karen\W+)?(no\W+)?(that|this|it) (was ?n'?t|was not|is ?n'?t|is not) (meant )?for you"
+                        r"|^\W*(karen\W+)?i (was ?n'?t|was not|am not|wasn't) talking to you", re.I)
 VIEWABLE = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".txt", ".md", ".csv", ".json", ".py",
             ".js", ".html", ".htm", ".xml", ".log", ".yaml", ".yml", ".mp4", ".mp3", ".m4a", ".wav", ".ino", ".c", ".cpp"}
 
@@ -48,6 +78,26 @@ def log(tag, msg=""):
     LOG.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {line}\n")
 
 
+def tail_trace(exc=None, lines=8):
+    """The last lines of a traceback (the current exception's by default), indented for the log."""
+    import traceback
+    text = "".join(traceback.format_exception(*exc) if exc else traceback.format_exc())
+    return "\n".join("       " + s for s in text.rstrip().splitlines()[-lines:])
+
+
+def crash_logging():
+    """Until 2026-11-08 the log never said when or why Karen stopped: a closed window, a Python error in a thread
+    and a hard crash all looked the same. Now uncaught errors go to karen.log and hard crashes to logs/crash.log."""
+    import faulthandler
+    try:
+        faulthandler.enable(open("logs/crash.log", "a", encoding="utf-8"))  # native crashes (onnx, MKL, COM)
+    except OSError:
+        pass
+    sys.excepthook = lambda *exc: log("error", f"uncaught: {exc[1]!r}\n{tail_trace(exc)}")
+    threading.excepthook = lambda a: log("error", f"thread {a.thread.name if a.thread else '?'}: {a.exc_value!r}\n"
+                                                  f"{tail_trace((a.exc_type, a.exc_value, a.exc_traceback))}")
+
+
 class Karen:
     """Wires mic -> wake word -> speech-to-text -> brain -> voice, and keeps the interface informed."""
 
@@ -55,21 +105,28 @@ class Karen:
         from core.ui import NullUI
         self.cfg, self.settings = cfg, settings
         self.ui = NullUI()
+        self.controls = None  # the page's API (set when there is a window); the study window shares it
         self.actions = queue.Queue()          # from the interface: ("talk",) ("text", str) ("mute", bool)
         self.confirm_answers = queue.Queue()  # YES/NO clicks, for the confirmation gate (Phase 2)
         self.muted = False
         self.mic = self.speaker = self.brain = self.tools = None
         self.sticky = set()  # tool groups used in the last answer, offered again for follow-ups
+        self.used = set()  # tool groups used while answering (run_tool adds to it)
         self.asked = False   # her last answer was a question
         self.awaiting = False  # Karen's last answer was a question
         self.said_on_it = 0.0  # when "On it." was last said before a slow tool
-        self.barged = False    # they said "Karen" while she was talking
+        self.barged = False    # he said "Karen" while she was talking
         from core.audio import Ducker
         self.ducker = Ducker(1)  # replaced in load() once the mic exists
         self.started = time.time()
         self.face, self.locked, self.face_seen = None, False, 0.0  # face unlock (Settings), see face_gate()
         self.phonewatch = None  # announces phone calls and messages (voice mode only)
         self.attachments = []  # files added with the + button / drag and drop (paths in data/uploads)
+        self.cortex = None          # the local brain-inspired network (core/cortex)
+        self.idle = False           # waiting for the wake word: the only time the Cortex's ear listens
+        self.request_audio = None   # the audio of the request being answered, for the Cortex
+        self.request_how = ("wake", 0.0)  # how it arrived: wake (+ score) | followup | button
+        self.last_reply_t = None    # when her last answer ended
 
     # ---------------------------------------------------------------- setup
     def load(self, listen=True):
@@ -84,6 +141,14 @@ class Karen:
         backends = sorted(c["llm"]["backends"], key=lambda b: b["name"] != st.get("brain"))  # chosen one first
         self.brain = Brain(backends, c["llm"]["system_prompt"], c["llm"]["max_tokens"], c["llm"]["history_turns"],
                            private_backends(c["llm"]), c["llm"].get("max_tool_rounds", 5))
+        night = c.get("night", {})  # night mode: quieter voice and short answers inside night.window
+        self.speaker.volume = lambda: night.get("volume", 0.5) if quiet_now(night.get("window", "")) else 1.0
+        from core import study
+        self.brain.extra = lambda: ((" It's late at night and he may be winding down: answer in one or two short "
+                                     "sentences unless he asks for more." if quiet_now(night.get("window", "")) else "")
+                                    + (study.PROMPT if study.is_on() else ""))
+        self.brain.persona = lambda: "" if study.is_on() else Brain.persona()  # Mam is a teacher: mode paused
+        self.last_reply = ""  # for "repeat that" / "say it slower"
         from core.tools import Tools
         self.tools = Tools(c.get("mcp_servers"), c.get("confirm"), log, ask=self.confirm)  # servers can ask mid-task
         self.tools.on_change = lambda: self.ui.call("abilities", self.abilities())
@@ -107,9 +172,14 @@ class Karen:
             pw = c.get("phone_watch") or {}
             if pw.get("enabled", True):  # incoming calls and WhatsApp/SMS, said aloud (core/phonewatch.py)
                 from core.phonewatch import PhoneWatch
-                self.phonewatch = PhoneWatch(pw, self.action, log, (c.get("phone") or {}).get("device", "")).start()
+                self.phonewatch = PhoneWatch(pw, self.phone_event, log, (c.get("phone") or {}).get("device", ""),
+                                             (c.get("phone") or {}).get("second", "")).start()
+            if (c.get("cortex") or {}).get("enabled"):
+                threading.Thread(target=self.load_cortex, daemon=True).start()  # ~2 s; she can answer meanwhile
         self.speaker.synth("Yes?")  # warm up and cache
         self.load_face(st.get("face_lock", False))
+        if study.is_on():  # study mode survives a restart (its window waits for the page, so not on this thread)
+            threading.Thread(target=self.set_study, args=(True, True), daemon=True).start()
         self.push_config()
         self.ui.call("abilities", self.abilities())
         self.ui.call("muted", False)
@@ -119,13 +189,15 @@ class Karen:
         from core.stt import STT
         from core.wake import OwwWake, WhisperWake
         w = self.cfg["wake"]
-        whisper_wake = WhisperWake(STT(w["model"], self.cfg["stt"]["compute_type"], threads=2), w["words"])
+        # only its split() (find "Karen" in a transcript) is used next to the personal / openWakeWord detectors, so
+        # its Whisper model is loaded only when it IS the detector (it was loaded every start, never used)
+        whisper_wake = WhisperWake(None, w["words"])
         threshold = self.settings.get("wake_threshold")
         if w["engine"] == "personal":
             if os.path.exists(w["personal_model"]):
                 from core.wake import PersonalWake
                 log("wake", f"personal wake word {w['personal_model']}")
-                return PersonalWake(w["personal_model"], threshold, patience=w.get("patience")), whisper_wake
+                return self.gated(PersonalWake(w["personal_model"], threshold, patience=w.get("patience"))), whisper_wake
             log("wake", f"{w['personal_model']} not found (run scripts/train_wake.py), using Whisper wake word")
         if w["engine"] == "oww":
             if os.path.exists(w["oww_model"]):
@@ -133,7 +205,63 @@ class Karen:
                 log("wake", f"openWakeWord {w['oww_model']}" + (" + voice verifier" if verifier else ""))
                 return OwwWake(w["oww_model"], threshold or w["threshold"], verifier, w["verifier_threshold"]), whisper_wake
             log("wake", f"{w['oww_model']} not found, using Whisper wake word")
+        whisper_wake.stt = STT(w["model"], self.cfg["stt"]["compute_type"], threads=2)
         return whisper_wake, whisper_wake
+
+    def gated(self, wake):
+        """Only his voice wakes her (config wake.voice_gate, 0 = off): see core.wake.VoiceGate."""
+        level = self.cfg["wake"].get("voice_gate", 0)
+        if level:
+            from core.wake import VoiceGate
+            wake.gate = VoiceGate(level, shared=lambda: getattr(getattr(self, "cortex", None), "voice", None), log=log)
+            if wake.gate.me is None:
+                wake.gate = None
+            else:
+                log("wake", f"voice check on (only your voice, {level})")
+        return wake
+
+    def load_cortex(self):
+        if not os.path.exists("models/cortex/voice.onnx"):
+            log("cortex", "models/cortex missing (run scripts/download_models.py), Cortex off")
+            return
+        try:
+            from core.cortex import Cortex
+            cortex = Cortex(self.cfg["cortex"], log)
+            cortex.start_ear(self.mic, lambda: self.idle and not self.muted)
+            self.cortex = cortex
+        except Exception as e:
+            log("cortex", f"couldn't start: {e!r}")
+
+    def attend(self, text, audio, spoken):
+        """The Cortex's attention on a request. Returns False when Karen should stay quiet (attention "on" and not
+        for her); in shadow mode it only shows and stores its verdict."""
+        cx = self.cortex
+        if NOT_FOR_ME.search(text):
+            threading.Thread(target=cx.not_for_me, daemon=True).start()
+            log("cortex", "labelled the last request: not for Karen")
+            self.ui.call("message", "karen", "Sorry. I'll learn from that.", "cortex")
+            self.speaker.say("Sorry. I'll learn from that.")
+            self.ui.call("done")
+            return False
+        how, score = self.request_how
+        self.request_how = ("wake", 0.0)
+        verdict = None
+        if spoken:
+            try:
+                verdict = cx.attend(text, how, score, self.last_reply, self.last_reply_t)
+            except Exception as e:
+                log("cortex", f"attention failed: {e!r}")
+        cx.request(text, audio, **({"attention": verdict} if verdict else {"how": how if spoken else "typed"}))
+        if not verdict:
+            return True
+        quiet = verdict["verdict"] == "ignore" and how != "button"  # the talk button is always for her
+        log("cortex", f"{'would ignore' if quiet else 'for me'} p={verdict['p']:.2f} (threshold "
+                      f"{verdict['threshold']:.2f}, {how}{'' if cx.mode == 'on' else ', shadow'})")
+        self.ui.call("cortex", dict(verdict, mode=cx.mode, acted=quiet and cx.mode == "on", heard_total=cx.heard_count))
+        if quiet and cx.mode == "on":
+            self.ui.call("state", "sleeping", "NOT FOR ME")
+            return False
+        return True
 
     def load_face(self, on):
         """Face unlock on: she starts locked and answers once she has seen the user's face."""
@@ -147,7 +275,7 @@ class Karen:
         return bool(self.face)
 
     def face_gate(self, text):
-        """While locked (start-up, "lock yourself", or relock_min idle), check the webcam for their face first.
+        """While locked (start-up, "lock yourself", or relock_min idle), check the webcam for his face first.
         True = handled here, don't answer."""
         if not self.face:
             return False
@@ -165,6 +293,12 @@ class Karen:
             log("face", f"{why}, score {score:.2f}, {time.time() - t:.1f}s")
             if not ok:
                 self.locked = True
+                if why == "not him" and f.get("intruder_alert", True) and self.face.stranger is not None \
+                        and time.time() - getattr(self, "last_intruder", 0) > 300:  # one alert per 5 min
+                    self.last_intruder = time.time()
+                    from core.face import intruder_alert
+                    threading.Thread(target=intruder_alert, daemon=True,
+                                     args=(self.face.stranger[0], self.face.stranger[1], text, log)).start()
                 msg = {"camera": "I can't use the camera right now, so I can't unlock.",
                        "no face": "I'm locked. Look at the camera so I can see it's you.",
                        }.get(why, "Sorry, I'm locked. I only answer my owner.")
@@ -188,16 +322,19 @@ class Karen:
             "sounds": self.settings.get("sounds", True),
             "avatar": self.settings.get("avatar"),
             "mode": persona_mode(),
+            "theme": self.settings.get("theme", "aurora"),
             "face_lock": bool(self.face), "face_ready": face_ready(),
         })
 
     def abilities(self):
         notes = {"on": "connected", "starting": "starting...", "error": "failed, see log", "setup": "needs .env keys"}
-        servers = [{"name": spec.get("label", n), "status": "on" if self.tools.status.get(n) == "on" else "",
-                    "note": notes.get(self.tools.status.get(n), "") if spec.get("enabled", True) else "off (setup.py)"}
+        servers = [{"name": spec.get("label", n), "short": spec.get("short"),
+                    "status": "on" if self.tools.status.get(n) == "on" else "",
+                    "note": notes.get(self.tools.status.get(n), "")}
                    for n, spec in (self.cfg.get("mcp_servers") or {}).items()]
         planned = [dict(p, status="planned") for p in (self.cfg.get("ui") or {}).get("planned") or []]
-        return [{"name": "Conversation", "status": "on", "note": self.brain.backends[0]["name"]}] + servers + planned
+        return [{"name": "Conversation", "short": "Chat", "status": "on", "note": self.brain.backends[0]["name"]}] \
+            + servers + planned
 
     # ---------------------------------------------------------------- main loop
     def run(self):
@@ -212,6 +349,7 @@ class Karen:
         threading.Thread(target=self.ticker, daemon=True).start()
         self.speaker.say("I'm ready.")  # not her own name: the mic would hear it and wake her
         log("ready", 'say "Karen" (Ctrl+C quits)')
+        failures = []
         while True:
             try:
                 self.mic.interrupt.clear()
@@ -230,7 +368,11 @@ class Karen:
                     self.do(*self.actions.get())
                 else:
                     self.ui.call("state", "sleeping")
-                    audio = self.wake.wait(self.mic, log)
+                    self.idle = True
+                    try:
+                        audio = self.wake.wait(self.mic, log)
+                    finally:
+                        self.idle = False
                     self.ducker.duck()  # turn music down while we talk
                     try:
                         self.on_wake(audio)
@@ -239,12 +381,17 @@ class Karen:
                         self.ducker.restore()
             except Interrupted:
                 pass  # an interface action is waiting in self.actions
+            except Exception as e:  # anything else used to end this thread: window open, Karen deaf, nothing logged
+                failures = [t for t in failures if time.time() - t < 60] + [time.time()]
+                log("error", f"voice loop: {e!r}\n{tail_trace()}")
+                self.ui.call("toast", "error", f"Something went wrong ({type(e).__name__}); still listening")
+                time.sleep(min(30, 2 ** len(failures)))  # back off if it keeps failing (no busy loop)
 
     def do(self, kind, value=None):
         if kind in ("talk", "text"):
             self.ducker.duck()
             try:
-                self.listen_and_answer(say_yes=False) if kind == "talk" else self.answer(value)
+                self.listen_and_answer(say_yes=False, how=("button", 0.0)) if kind == "talk" else self.answer(value)
                 self.follow_up()
             finally:
                 self.ducker.restore()
@@ -273,7 +420,7 @@ class Karen:
                 self.ducker.restore()
         elif kind == "message":  # a new WhatsApp / SMS on the phone
             app, sender, body = value
-            if self.locked:  # face unlock: don't read their messages to whoever is in the room
+            if self.locked:  # face unlock: don't read his messages to whoever is in the room
                 text = f"New {app} on your phone."
             else:
                 text = f"{app.capitalize() if app != 'WhatsApp' else app} from {sender}: {body}"
@@ -292,10 +439,33 @@ class Karen:
         elif kind == "approve":  # a Dot working in the background needs a yes/no before a risky tool
             dot, tool, args, reply = value
             reply.put(self.confirm(f"{dot} asks: {describe(tool, args)}"))
+        elif kind == "study":  # the Study / Exit study buttons
+            from core import study
+            if study.is_on() != value:
+                text = self.set_study(value)
+                self.push_config()
+                self.ui.call("message", "karen", text, "mode switch")
+                self.speaker.say(text)
+                self.ui.call("done")
         elif kind == "mute":
             self.muted = value
             self.ui.call("muted", value)
             log("mute", "microphone muted" if value else "microphone on")
+
+    def phone_event(self, kind, value):
+        """PhoneWatch: a call or message shows in the island at once (her spoken line waits its turn)."""
+        island = getattr(self.ui, "island", None)
+        if island:
+            island.ringing = lambda: bool(self.phonewatch and self.phonewatch.ringing)
+            if kind == "ring":
+                island.phone_call("Your phone" if self.locked else value.rsplit(" is calling", 1)[0])
+            elif kind == "message":
+                app, sender, body = value
+                if self.locked:  # face unlock: no names or text for whoever is in the room
+                    island.phone_message(app, f"New {app}", "On your phone")
+                else:
+                    island.phone_message(app, sender, body)
+        self.action(kind, value)
 
     def action(self, kind, value=None):
         """Called from the interface thread: queue it and break the loop out of listening."""
@@ -307,11 +477,12 @@ class Karen:
 
     def on_wake(self, audio):
         w = self.cfg["wake"]
+        self.request_how = ("wake", getattr(self.wake, "last_score", 1.0))
         if audio is not None:  # Whisper wake: the request may be in the same utterance
             self.ui.call("state", "thinking")
             t = time.time()
             request = self.whisper_wake.split(self.stt.transcribe(audio))[1]
-        else:  # openWakeWord: give them a moment to keep talking ("Karen, open Chrome")
+        else:  # openWakeWord: give him a moment to keep talking ("Karen, open Chrome")
             self.ui.call("state", "listening")
             self.mic.vad.reset()
             audio = self.mic.listen(timeout=w["continue_s"])
@@ -320,7 +491,11 @@ class Karen:
             if audio is not None:
                 self.ui.call("state", "thinking")
                 request = self.stt.transcribe(audio)
+                if BARE.match(request):  # he said "Karen" again: chime and listen instead of "could you clarify?"
+                    log("wake", f"bare wake ({request.strip()})")
+                    request = ""
         if request:
+            self.request_audio = audio
             self.answer(request, time.time() - t)
         elif not self.listen_and_answer(say_yes=True):
             self.save_false_wake()
@@ -343,10 +518,12 @@ class Karen:
         """Karen asked a question: keep listening a few seconds so "yes" works without saying "Karen" again."""
         while self.awaiting and not self.muted:
             self.awaiting = False
-            self.listen_and_answer(say_yes=False, timeout=self.cfg["wake"].get("followup_s", 6))
+            self.listen_and_answer(say_yes=False, timeout=self.cfg["wake"].get("followup_s", 6), how=("followup", 0.0))
 
-    def listen_and_answer(self, say_yes, timeout=None):
-        if say_yes:  # a soft chime, not a spoken "Yes?": false wakes then don't talk over their day
+    def listen_and_answer(self, say_yes, timeout=None, how=None):
+        if how:
+            self.request_how = how
+        if say_yes:  # a soft chime, not a spoken "Yes?": false wakes then don't talk over his day
             if self.settings.get("sounds", True):
                 self.speaker.chime()
         self.mic.flush()
@@ -359,12 +536,13 @@ class Karen:
         t = time.time()
         request = self.stt.transcribe(audio)
         if request:
+            self.request_audio = audio
             self.answer(request, time.time() - t)
         return bool(request)
 
     def morning_due(self, path="data/morning.json"):
-        """Once a day, the first time she's with them in the morning window (start-up, or right after their first
-        request), she gives the briefing unasked. Not while face-locked: it reads their mail and calendar."""
+        """Once a day, the first time she's with him in the morning window (start-up, or right after his first
+        request), she gives the briefing unasked. Not while face-locked: it reads his mail and calendar."""
         m = self.cfg.get("morning") or {}
         now = datetime.datetime.now()
         if not m.get("enabled") or self.locked or not quiet_now(m.get("window", "05:00-11:30")):
@@ -384,10 +562,34 @@ class Karen:
         meta = meta or (f"speech-to-text {self.stt.used} {stt_s:.1f}s" if stt_s else "typed")
         log("you", f"{text}  ({meta})")
         self.ui.call("message", "you", text, meta)
+        audio, self.request_audio = self.request_audio, None
+        if self.cortex and meta != "morning briefing" and not self.attend(text, audio, stt_s is not None):
+            return
         if self.face_gate(text):
+            return
+        again = REPEAT.match(text) or SLOWER.match(text)
+        if again and self.last_reply:  # "repeat that" / "say it slower": her last answer again, no AI call
+            speed = self.speaker.speed
+            if SLOWER.match(text):
+                self.speaker.speed = max(0.6, speed * 0.8)
+            log("karen", f"(again{', slower' if SLOWER.match(text) else ''}) {self.last_reply[:80]}")
+            self.ui.call("state", "thinking", "AGAIN")
+            try:
+                self.speaker.say(self.last_reply)
+            finally:
+                self.speaker.speed = speed
+            self.ui.call("done")
             return
         from core import persona
         switched = self.phonewatch and self.phonewatch.command(text)  # "pick up" / "reject" while it rings
+        if not switched:
+            from core import study
+            on = study.command(text)  # "study mode" / "study mode off": colours, wake word and study window, no LLM
+            switched = self.set_study(on) if on is not None else None
+        if not switched:
+            switched = self.meeting_command(text)  # "start / stop taking meeting notes": at once, no LLM
+        if not switched:
+            switched = self.stop_all(text)  # "stop everything": meeting notes, recordings, music
         switched = switched or persona.command(text)  # "work mode" / "love mode" / "both mode": at once, no LLM
         if not switched:
             from core import dots
@@ -406,10 +608,15 @@ class Karen:
             return
         self.ui.call("state", "thinking", self.brain.backends[0]["name"].upper())
         sticky = set(self.sticky) if REFERS_BACK.search(text) or self.asked else set()  # follow-ups keep the tools  # "reply to that" keeps the last tools
-        if self.attachments:  # files they added: tell the brain, and offer the file tools
+        if self.attachments:  # files he added: tell the brain, and offer the file tools
             names = ", ".join(os.path.basename(a) for a in self.attachments)
             text = f"{text}\n[Attached files in data/uploads: {names}]"
             sticky |= {("files", g) for g in {t["group"] for t in self.tools.tools.values() if t["server"] == "files"}}
+            if any(a.lower().endswith((".csv", ".tsv", ".xlsx", ".xlsm", ".json")) for a in self.attachments):
+                sticky.add(("friday", "data_*|convert_data"))  # tables: Friday's data tools too
+        from core import study
+        if study.is_on() and self.tools:  # study mode: Mam can always draw, teach and play videos
+            sticky |= {("study", t["group"]) for t in self.tools.tools.values() if t["server"] == "study"}
         tools = self.tools.select(text, sticky) if self.tools else []
         self.used, offered = set(), self.tools.groups_of(tools) if self.tools else set()
         t = time.time()
@@ -437,19 +644,28 @@ class Karen:
         voice = self.speaker.first_audio - t if self.speaker.first_audio else None
         meta = f"{b['failed']}first word {b['backend']} {b['first']:.1f}s" + (f", voice starts {voice:.1f}s" if voice else "")
         log("karen", f"{reply.strip()}  ({meta})")
+        self.last_reply, self.last_reply_t = reply.strip(), time.time()
         self.ui.call("message", "karen", reply.strip(), meta)
         self.ui.call("timing", {"stt": stt_s, "llm": b["first"], "voice": voice,
                                 "backend": b["backend"], "fallback": bool(b["failed"])})
         self.ui.call("memory", len(self.brain.turns))
         self.awaiting = reply.strip().endswith("?") and self.mic is not None  # she asked something: listen for it
-        self.asked = reply.strip().endswith("?")  # her question: their answer gets the same tools ("like 2 weeks")
-        self.sticky = self.used | (offered if self.asked else set())
+        self.asked = reply.strip().endswith("?")  # her question: his answer gets the same tools ("like 2 weeks")
+        # ...and the tools her question itself is about ("Should I add a reminder to your calendar?" asked in plain
+        # chat): his "yes" / "mm" then goes to the tool path instead of a chat answer that only claims it was done
+        self.sticky = self.used | ((offered | self.tools.groups_for(reply)) if self.asked and self.tools else set())
+        from core.brain import claims_action
+        if not tools and not self.used and claims_action(reply) and not self.speaker.stop_event.is_set():
+            fix = self.brain.correct_claim()  # no tool ran, so whatever she says she did didn't happen
+            log("karen", f"{fix}  (she claimed an action with no tool)")
+            self.ui.call("message", "karen", fix, "correction")
+            self.speaker.say(fix)
         if not self.speaker.stop_event.is_set():
             self.ui.call("done")
-        if self.barged:  # they said "Karen" while she was talking: she stopped, now listen to them
+        if self.barged:  # he said "Karen" while she was talking: she stopped, now listen to him
             self.barged = False
             self.awaiting = False
-            self.listen_and_answer(say_yes=False)
+            self.listen_and_answer(say_yes=False, how=("wake", 1.0))
 
     def watch_for_barge_in(self):
         """While Karen speaks, listen for the wake word; if heard, cut her off. Returns the event that ends the
@@ -488,6 +704,91 @@ class Karen:
         log("show", url)
         self.ui.show(url)
 
+    # ---------------------------------------------------------------- meeting notes (servers/meeting)
+    def meeting_command(self, text):
+        """"Start / stop taking meeting notes" calls the meeting tool directly. Returns what she says, or None."""
+        from core import meeting
+        what = meeting.command(text)
+        name = f"meeting__{what}_meeting_notes"
+        if not what or not self.tools or name not in self.tools.tools:
+            return None  # not a meeting phrase, or the server isn't up yet: the LLM path waits for it
+        result = self.run_tool(name, {})
+        return result.split("\n", 1)[0].strip()
+
+    def stop_all(self, text):
+        """"Stop everything": ends meeting notes and recordings and pauses the music, with the real tools. Returns
+        what she says, or None when it isn't that phrase."""
+        if not STOP_ALL.match(text) or not self.tools:
+            return None
+        stopped = []
+
+        def running(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    st = json.load(f)
+            except (OSError, ValueError):
+                return False
+            return bool(st.get("on")) if "on" in st else bool(st)
+
+        if running("data/meeting.json") and "meeting__stop_meeting_notes" in self.tools.tools:
+            self.run_tool("meeting__stop_meeting_notes", {})
+            stopped.append("the meeting notes (they're open in the viewer)")
+        if running("data/recording.json") and "jarvis__stop_recording" in self.tools.tools:
+            if self.run_tool("jarvis__stop_recording", {"kind": "all"}).startswith("Saved"):
+                stopped.append("the recording")
+        if "media__music" in self.tools.tools and self.tools.call("media__music", {"action": "pause"}).startswith("Paused"):
+            stopped.append("the music")
+        if not stopped:
+            return "Nothing was running: no meeting notes, recording or music."
+        return "Stopped " + (", ".join(stopped[:-1]) + " and " + stopped[-1] if len(stopped) > 1 else stopped[0]) + "."
+
+    def push_meeting(self):
+        """The red "meeting notes" pill in the window's header (data/meeting.json, written by the server)."""
+        try:
+            with open("data/meeting.json", encoding="utf-8") as f:
+                st = json.load(f)
+        except (OSError, ValueError):
+            st = {}
+        self.ui.call("meeting", {"on": bool(st.get("on")), "since": st.get("since"), "source": st.get("source", "")})
+
+    # ---------------------------------------------------------------- study mode (core/study.py)
+    def set_study(self, on, quiet=False):
+        """Study mode on/off: black and yellow, called "Mam" (her own wake model once trained), the study window.
+        Returns what she says."""
+        from core import study
+        study.set_on(on)
+        w = self.cfg["wake"]
+        model = w.get("study_model", "")
+        if on and self.mic and os.path.exists(model) and not getattr(self, "karen_wake", None):
+            from core.wake import PersonalWake
+            self.karen_wake, self.wake = self.wake, self.gated(PersonalWake(model, None, patience=w.get("patience")))
+            log("wake", f"study mode: wake word {model}")
+        elif not on and getattr(self, "karen_wake", None):
+            self.wake, self.karen_wake = self.karen_wake, None
+        self.ui.call("study", on)
+        self.ui.study_window(on, self.controls)
+        log("study", "on" if on else "off")
+        if quiet:
+            return None
+        if not on:
+            return "Study mode off. Karen's back."
+        if getattr(self, "karen_wake", None):
+            return "Study mode on. I'm Mam now. Say Hey Mam when you need me."
+        return "Study mode on. I'm Mam now. Until you train Hey Mam, you can still call me Karen."
+
+    def study_show(self, what):
+        """Push data/study/<what>.json (visual or lesson) to the study window, opening study mode if needed."""
+        from core import study
+        try:
+            with open(os.path.join(study.DIR, f"{what}.json"), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return
+        if not study.is_on():
+            self.set_study(True, quiet=True)
+            time.sleep(1.5)  # let the window load before the first call
+        self.ui.study_call(what, data)
+
     def add_attachments(self, paths):
         import shutil
         os.makedirs("data/uploads", exist_ok=True)
@@ -512,20 +813,34 @@ class Karen:
         self.ui.call("intensity", 0.85)
         if self.tools.needs_confirm(name) and not self.confirm(describe(short, args)):
             log("tool", f"{short} cancelled by the user")
-            return "The user said no, so nothing was done. Don't retry; just tell them it was cancelled."
+            return "The user said no, so nothing was done. Don't retry; just tell him it was cancelled."
         t = time.time()
-        if short in SLOW_TOOLS and self.mic and t - self.said_on_it > 30:
+        if short == "visualize" and (args.get("style") in ("explainer", "interactive", "simulation", "animation")
+                                     or args.get("detail") in ("detailed", "deep")) and self.mic:
+            self.speaker.say("Drawing it. Detailed ones take about a minute.")  # Claude's explainers: ~1 minute
+        elif short in SLOW_TOOLS and self.mic and t - self.said_on_it > 30:
             self.said_on_it = t
-            self.speaker.say(SLOW_SAY.get(short, "On it."))  # these take a while; don't leave them in silence
+            self.speaker.say(SLOW_SAY.get(short, "On it."))  # these take a while; don't leave him in silence
         result = self.tools.call(name, args)
         log("tool", f"{short} {json.dumps(args, ensure_ascii=False)[:200]} -> {len(result)} chars, {time.time() - t:.1f}s")
         if short in ("set_mode", "set_persona", "clear_persona"):
             self.push_config()  # the Settings menu and the avatar follow a mode changed by voice
+        if short in ("start_meeting_notes", "stop_meeting_notes"):
+            self.push_meeting()
         if "ACTION REQUIRED" in result and "Authorization URL" in result:
             raise NeedsSignIn()
+        for what in STUDY.findall(result):  # a study tool made a visual or a lesson: the study window shows it
+            self.study_show(what.strip())
+        result = STUDY.sub("(now shown in the study window)", result)
         for target in SHOW.findall(result):
             self.show(target.strip())
         result = SHOW.sub("(now shown in Karen's viewer)", result)
+        for url, title, link in MAP.findall(result):
+            if getattr(self.ui, "island", None):
+                self.ui.island.show_map(url.strip(), title.strip(), link.strip())
+            else:
+                self.show(link.strip() or url.strip())
+        result = MAP.sub("(now shown on screen)", result)
         for lang, voice, text in SAY.findall(result):
             self.ui.call("message", "karen", text, "translation")
             try:
@@ -601,6 +916,10 @@ class Karen:
             if due > now:
                 continue
             late = now - due > datetime.timedelta(minutes=2)
+            island = getattr(self.ui, "island", None)
+            if island and r.get("tag") != "hiit":  # the capsule shows it with Snooze / Stop, even while she's busy
+                # (not each HIIT call-out: they come every 20-40 s and the countdown already shows the next one)
+                island.ring("timer" if r.get("timer") else "reminder", r["text"], dict(r))
             self.action("announce", ("" if r.get("timer") else "Reminder: ") + r["text"]
                         + (f" (this was due at {due:%I:%M %p})" if late else "") + ".")
             from core.reminders import advance
@@ -609,6 +928,33 @@ class Karen:
         if changed:
             json.dump(items, open(path + ".tmp", "w", encoding="utf-8"), indent=1, ensure_ascii=False)
             os.replace(path + ".tmp", path)
+        self.check_announcements()
+
+    def check_announcements(self, path="data/announce.json"):
+        """Updates Karen Remote wants said aloud: he's at the PC, so she speaks instead of ringing his phone
+        (remote.py ring_pending). The file is taken by renaming it, so a line Remote adds meanwhile isn't lost."""
+        if not os.path.exists(path):
+            return
+        taking = path + ".taking"
+        try:
+            os.replace(path, taking)
+            with open(taking, encoding="utf-8") as f:
+                items = json.load(f)
+        except (OSError, ValueError):
+            return
+        finally:
+            try:
+                os.remove(taking)
+            except OSError:
+                pass
+        now = datetime.datetime.now()
+        for it in items if isinstance(items, list) else []:
+            try:
+                fresh = now - datetime.datetime.fromisoformat(it["at"]) < datetime.timedelta(minutes=10)
+            except (KeyError, TypeError, ValueError):
+                fresh = False
+            if fresh and it.get("text"):
+                self.action("announce", it["text"])
 
     def ticker(self):
         """Audio levels ~15x a second and system stats once a second, for the interface."""
@@ -655,7 +1001,7 @@ class Karen:
             value = self.wake.threshold = max(float(value), getattr(self.wake, "floor", 0.0))
         elif key == "face_lock":
             value = self.load_face(bool(value))
-            self.locked = False  # they're at the window switching it on; it locks again on "lock yourself" or idle
+            self.locked = False  # he's at the window switching it on; it locks again on "lock yourself" or idle
             self.face_seen = time.time()
         elif key not in ("sounds", "avatar"):
             return
@@ -721,6 +1067,83 @@ class Controls:
     def remove_attachment(self, name):
         self._k.attachments = [a for a in self._k.attachments if os.path.basename(a) != name]
         self._k.push_attachments()
+
+    # ------------------------------------------------ Karen Island (core/island.py)
+    def island_ready(self):
+        self._k.ui.island.page_ready()
+
+    def island_resize(self, w, h):
+        self._k.ui.island.resize(w, h)
+
+    def island_close(self):
+        self._k.ui.island.collapse()
+
+    def island_blur(self):
+        self._k.ui.island.blur()
+
+    def island_music(self, action):
+        from core.island import media_control
+        if action in ("pause", "resume", "next", "previous"):
+            threading.Thread(target=media_control, args=(action,), daemon=True).start()
+
+    def island_seek(self, seconds):
+        threading.Thread(target=self._k.ui.island.seek, args=(float(seconds),), daemon=True).start()
+
+    def island_volume(self, level=None, muted=None):
+        from core.island import set_pc_volume
+        set_pc_volume(level, muted)
+
+    def island_clip(self, action):
+        """The panel's clipboard buttons (Summarise / Translate / Explain / dismiss)."""
+        def run():
+            request = self._k.ui.island.clip_action(action)
+            if request:
+                self._k.action("text", request)
+        threading.Thread(target=run, daemon=True).start()
+
+    def island_files(self, paths):
+        """Files dropped on the capsule: they ride along with the next requests, like the + button."""
+        self._k.add_attachments(paths)
+        log("files", f"dropped on the island: {', '.join(os.path.basename(p) for p in paths)}")
+
+    def island_alert(self, how, item):
+        """The capsule's Stop / Snooze on a timer or reminder that went off."""
+        if self._k.speaker:
+            self._k.speaker.stop_event.set()
+        if how == "snooze" and item:
+            from core.reminders import snooze
+            snooze(item, 5)
+            log("remind", f"snoozed 5 min: {item.get('text', '')}")
+
+    def island_phone(self, answer):
+        """The capsule's answer / reject buttons while the phone rings."""
+        pw = self._k.phonewatch
+        if not pw:
+            return
+        said = pw.command("pick up" if answer else "reject") or ""
+        if self._k.speaker:
+            self._k.speaker.stop_event.set()
+        if self._k.mic:
+            self._k.mic.interrupt.set()  # she was listening for "pick up" / "reject"
+        log("phone", f"island: {said}")
+        if said:
+            self._k.ui.island.note(said)
+
+    def open_main(self):
+        self._k.ui.window.show()
+        self._k.ui.window.restore()
+
+    def listen_cut(self, how):
+        """The island's listening pill: ✓ = that's all, use what I said; ✕ = never mind."""
+        mic = self._k.mic
+        if not mic:
+            return
+        if how == "done":
+            mic.finish.set()
+        else:
+            if self._k.speaker:
+                self._k.speaker.stop_event.set()
+            mic.interrupt.set()
 
     def confirm_answer(self, yes):
         self._k.confirm_answers.put(bool(yes))
@@ -788,8 +1211,32 @@ class Controls:
         dots.save_jobs([j for j in dots.jobs() if j["id"] != job_id])
         return self.dots_state()
 
+    # ------------------------------------------------ study window (ui/study.html)
+    def study_state(self):
+        """What the study window shows when it (re)loads: the conversation so far and today's notes."""
+        from core import study
+        out = {"notes": "", "thread": getattr(self._k.ui, "study_thread", [])}
+        try:
+            with open(os.path.join(study.DIR, "notes", time.strftime("%Y-%m-%d") + ".md"), encoding="utf-8") as f:
+                out["notes"] = f.read()
+        except OSError:
+            pass
+        return out
+
+    def study_mode(self, on):
+        """The Study button in Karen's dock, and Exit study in the study window."""
+        self._k.action("study", bool(on))
+
+    def study_save_notes(self, text):
+        from core import study
+        folder = os.path.join(study.DIR, "notes")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, time.strftime("%Y-%m-%d") + ".md"), "w", encoding="utf-8") as f:
+            f.write(text or "")
+        return True
+
     def open_link(self, url):
-        """Links inside pages open in their browser, never inside Karen's window."""
+        """Links inside pages open in his browser, never inside Karen's window."""
         import webbrowser
         if re.match(r"^https?://", url or ""):
             webbrowser.open(url)
@@ -818,7 +1265,7 @@ VOICE = True  # Karen Remote sets this False: confirm questions are read, not he
 
 
 def spoken(text):
-    """Make addresses and ISO times sound natural: sam@example.com -> sam at example dot com."""
+    """Make addresses and ISO times sound natural: arun@gmail.com -> arun at gmail dot com."""
     if not VOICE:
         return text
     text = re.sub(r"([\w.+-]+)@([\w-]+)\.([\w.]+)",
@@ -833,13 +1280,14 @@ def spoken(text):
     return re.sub(r"\d{4}-\d{2}-\d{2}(T[\d:]+(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?", when, text)
 
 
-SLOW_TOOLS = {"operate", "power_mode", "send_whatsapp", "send_whatsapp_file", "whatsapp_read", "whatsapp_chats",
+SLOW_TOOLS = {"operate", "phone_do", "power_mode", "send_whatsapp", "send_whatsapp_file", "whatsapp_read", "whatsapp_chats",
               "junk_scan", "clean_junk", "look", "research_mode", "research_report", "research_summary",
-              "explain_error", "work_mode"}
+              "explain_error", "work_mode", "teach", "stop_meeting_notes"}
 
 
-SLOW_SAY = {"look": "Let me see.", "research_report": "On it. The report takes about a minute.",
-            "explain_error": "Let me look."}
+SLOW_SAY = {"phone_do": "On it. Watch your phone.", "look": "Let me see.", "research_report": "On it. The report takes about a minute.",
+            "explain_error": "Let me look.", "teach": "Let me set up the lesson.",
+            "stop_meeting_notes": "Wrapping up the meeting notes. This takes about a minute."}
 
 
 def describe(tool, args):
@@ -892,12 +1340,17 @@ def describe(tool, args):
                                           f"the message: {str(a['message']).rstrip('.?!')}" if a.get("message") else ""]))
         return spoken(f"From your phone, send {a.get('contact', '')} {what or 'a message'} on WhatsApp?")
     if tool == "phone_send_sms":
-        return spoken(f"Text {a.get('contact', '')} from your phone: {str(a.get('message', '')).rstrip('.?!')}?")
+        phone = "your second phone" if a.get("which") else "your phone"
+        return spoken(f"Text {a.get('contact', '')} from {phone}: {str(a.get('message', '')).rstrip('.?!')}?")
     if tool == "phone_call":
         sim = f" on SIM {a['sim']}" if a.get("sim") else ""
-        return spoken(f"Call {a.get('contact', '')} from your phone{sim}?")
+        phone = "your second phone" if a.get("which") else "your phone"
+        return spoken(f"Call {a.get('contact', '')} from {phone}{sim}?")
     if tool == "send_whatsapp":
         return spoken(f"Send WhatsApp to {a.get('contact', '')}: {str(a.get('message', '')).rstrip('.?!')}?")
+    if tool == "phone_do":
+        return (f"On your phone: {str(a.get('task', '')).rstrip('.?!')}. It taps through the apps by itself and "
+                f"screenshots go to Google's Gemini. Go ahead?")
     if tool == "power_mode":
         return f"Power mode: {str(a.get('task', '')).rstrip('.?!')}. It will write and run code on your PC. Go ahead?"
     if tool == "tidy_folder_apply":
@@ -926,6 +1379,7 @@ def start_tray(karen, visible=True):
         return None
 
     def quit_app():
+        log("quit", "from the tray")
         karen.ducker.restore()
         tray.stop()
         os._exit(0)
@@ -965,8 +1419,7 @@ def main():
         import sounddevice as sd
         print(sd.query_devices())
         return
-    from core.brain import load_config
-    cfg = load_config()
+    cfg = yaml.safe_load(open("config.yaml", encoding="utf-8"))
     try:
         settings = json.load(open(SETTINGS, encoding="utf-8"))
     except (OSError, ValueError):
@@ -982,6 +1435,7 @@ def main():
             ctypes.windll.user32.MessageBoxW(None, msg, "Karen", 0x40)
         return
 
+    crash_logging()
     karen = Karen(cfg, settings)
     if "--text" in sys.argv:
         karen.load(listen=False)
@@ -1000,10 +1454,14 @@ def main():
         karen.run()
     else:
         from core.ui import UI
-        background = "--background" in sys.argv  # autostart: only the tray icon until they open the window
-        karen.ui = UI(Controls(karen), hidden=background, characters=cfg.get("avatar", {}).get("characters"))
+        background = "--background" in sys.argv  # autostart: only the tray icon until he opens the window
+        karen.controls = Controls(karen)
+        island = cfg.get("island") or {}
+        hidden = background or (island.get("enabled") and not island.get("window_on_start"))  # the island is enough
+        karen.ui = UI(karen.controls, hidden=hidden, characters=cfg.get("avatar", {}).get("characters"), island=island)
         tray = start_tray(karen, visible=not background)
         karen.ui.run(karen.run)
+        log("quit", "window closed")
         if tray:
             tray.stop()
         karen.ducker.restore()  # never leave other apps turned down
@@ -1014,4 +1472,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nBye.")
+        log("quit", "Ctrl+C")
+        print("Bye.")

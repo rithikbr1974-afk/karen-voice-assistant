@@ -1,44 +1,39 @@
 @echo off
-rem Karen setup: Python 3.12 environment, packages, local models (~1.5 GB), then the setup wizard.
-rem Safe to run again. "setup.bat --menu" jumps straight to one step of the wizard.
+title Karen setup
+rem One click: installs Python 3.12 inside this folder, Karen's packages and models (~2.5 GB, 10-20 min the first
+rem time), then asks a few questions. Safe to run again: finished steps are skipped.
 cd /d "%~dp0"
-chcp 65001 >nul
-if "%~1"=="--menu" goto :wizard
-
+set "UV=%~dp0tools\uv.exe"
+set "UV_PYTHON_INSTALL_DIR=%~dp0.python"
+set "PATH=%~dp0tools;%PATH%"
 echo.
-echo  [1/3] Python environment and packages (a few minutes the first time)
-where uv >nul 2>nul
-if %errorlevel%==0 (
-    if not exist .venv\Scripts\python.exe uv venv --python 3.12 .venv || goto :fail
-    uv pip install --python .venv\Scripts\python.exe -r requirements.txt || goto :fail
-) else (
-    py -3.12 --version >nul 2>nul || goto :nopython
-    if not exist .venv\Scripts\python.exe py -3.12 -m venv .venv || goto :fail
-    .venv\Scripts\python.exe -m pip install --upgrade pip >nul
-    .venv\Scripts\python.exe -m pip install -r requirements.txt || goto :fail
+echo   Setting up Karen in %~dp0
+echo   Keep this window open. The first run downloads about 2.5 GB.
+echo.
+if not exist "%UV%" (
+    echo [0/4] uv, the Python installer, from astral.sh
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:UV_INSTALL_DIR='%~dp0tools'; $env:UV_NO_MODIFY_PATH='1'; irm https://astral.sh/uv/install.ps1 | iex"
+    if not exist "%UV%" goto :fail
 )
-
-echo.
-echo  [2/3] Voice, speech and wake word models
+if not exist .venv\Scripts\python.exe (
+    echo [1/4] Python 3.12
+    "%UV%" venv --python 3.12 --python-preference only-managed .venv || goto :fail
+)
+echo [2/4] Karen's packages
+"%UV%" pip install --python .venv\Scripts\python.exe -r requirements.txt || goto :fail
+echo [3/4] Voice, speech, face and hand models
 .venv\Scripts\python.exe scripts\download_models.py || goto :fail
-if not exist .env copy .env.example .env >nul
-
-:wizard
+echo [3/4] Google tools (Gmail, Calendar) - cached for offline start
+"%UV%" tool run --quiet --python cpython-3.12-windows-x86_64-none workspace-mcp@1.30.1 --help >nul 2>nul
+echo [4/4] Your details and keys
+.venv\Scripts\python.exe scripts\setup_wizard.py
 echo.
-echo  [3/3] Setup wizard
-.venv\Scripts\python.exe setup.py %*
+echo Setup done. Start Karen with START_KAREN.bat
 pause
 exit /b 0
 
-:nopython
-echo.
-echo Python 3.12 was not found. Install it from https://www.python.org/downloads/ (version 3.12)
-echo (tick "Add python.exe to PATH" in the installer), then run setup.bat again.
-pause
-exit /b 1
-
 :fail
 echo.
-echo Setup failed - see the error above. docs\SETUP.md has fixes for common problems.
+echo Setup stopped - see the message above. Check your internet connection and run SETUP.bat again.
 pause
 exit /b 1

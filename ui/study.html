@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mam - Study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Sora:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<link rel="stylesheet" href="study.css">
+<link rel="stylesheet" href="study_window.css">
+</head>
+<body class="study">
+<header>
+  <div class="mam-face big">M</div>
+  <div class="who"><h1>Mam</h1><span id="status">your study teacher</span></div>
+  <button class="head-btn" id="btn-notes" title="Your study notes for today">Notes</button>
+  <button class="head-btn" id="btn-exit" title="Leave study mode (Karen comes back)">Exit study</button>
+</header>
+
+<main id="thread">
+  <section id="welcome">
+    <div class="mam-face big">M</div>
+    <h2>What are we learning today?</h2>
+    <p>Ask me anything. I'll explain it, draw it, find the right videos and websites, and quiz you at the end.
+      Talk to me ("Hey Mam…") or type below.</p>
+    <div class="chips" id="starters"></div>
+  </section>
+</main>
+
+<aside id="notes">
+  <div id="n-bar"><b>Notes</b><span id="n-date"></span><span id="n-saved"></span><button id="n-close" title="Close">×</button></div>
+  <textarea id="n-text" placeholder="Your notes for today. They save as you type. Press “Save to notes” under any answer to add it here."></textarea>
+</aside>
+
+<div id="full"><div id="full-box"><button id="full-close" title="Close (Esc)">×</button><div id="full-stage"></div></div></div>
+
+<form id="ask">
+  <button type="button" id="ask-mic" title="Talk to Mam">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+  </button>
+  <input id="ask-text" placeholder="Ask Mam, or tell her what to draw…" autocomplete="off">
+  <button id="ask-send" title="Send (Enter)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+  </button>
+</form>
+
+<script src="vendor/mermaid/mermaid.min.js"></script>
+<script src="vendor/chartjs/chart.umd.min.js"></script>
+<script src="vendor/katex/katex.min.js"></script>
+<script src="study.js"></script>
+</body>
+</html>

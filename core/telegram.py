@@ -14,6 +14,8 @@ PHOTO = {".jpg", ".jpeg", ".png", ".webp"}
 
 class Telegram:
     name = "telegram"
+    buttons = True  # inline ✅/❌ buttons under messages
+    quiet = True    # send(..., silent=True) arrives without a sound; send_voice for voice notes
 
     def __init__(self, token, download_dir="data/uploads"):
         self.token, self.download_dir, self.offset = token, download_dir, None
@@ -32,7 +34,7 @@ class Telegram:
         return self._call("getMe")
 
     def set_commands(self, commands):
-        """The menu Telegram shows when they type "/": [(command, description)]."""
+        """The menu Telegram shows when he types "/": [(command, description)]."""
         try:
             self._call("setMyCommands", commands=[{"command": c, "description": d} for c, d in commands])
         except Exception:
@@ -52,7 +54,7 @@ class Telegram:
                 m, tap = u.get("message"), u.get("callback_query")
                 if m:
                     yield self._message(m)
-                elif tap:  # they tapped a button under one of Karen's messages
+                elif tap:  # he tapped a button under one of Karen's messages
                     try:
                         self._call("answerCallbackQuery", callback_query_id=tap["id"])
                     except Exception:
@@ -64,14 +66,19 @@ class Telegram:
     def _message(self, m):
         user = m.get("from", {})
         files = []
-        for kind in ("document", "photo", "audio", "video", "voice"):
+        for kind in ("document", "photo", "audio", "video", "voice", "video_note"):
             item = m.get(kind)
             if item:
                 item = item[-1] if kind == "photo" else item  # photos come in several sizes; the last is largest
-                files.append((item["file_id"], item.get("file_name") or f"{kind}-{m['message_id']}"))
+                name = item.get("file_name") or f"{kind.replace('_', '')}-{m['message_id']}"
+                if kind == "document" and os.path.exists(os.path.join(self.download_dir, name)):
+                    name = f"{m['message_id']}-{name}"  # a second "report.pdf" doesn't overwrite the first
+                files.append((item["file_id"], name))
         return {"channel": self.name, "chat": m["chat"]["id"], "user": user.get("id"),
+                "username": user.get("username") or "",  # his @name: /callme gives it to CallMeBot (core/callme.py)
                 "name": " ".join(filter(None, [user.get("first_name"), user.get("last_name")])),
-                "text": m.get("text") or m.get("caption") or "", "files": files}
+                "text": m.get("text") or m.get("caption") or "", "files": files,
+                "group": m.get("media_group_id")}  # an album: several messages, the caption on one of them
 
     def download(self, file_id, name):
         info = self._call("getFile", file_id=file_id)
@@ -79,17 +86,31 @@ class Telegram:
         ext = os.path.splitext(info["file_path"])[1]
         path = os.path.join(self.download_dir, name if os.path.splitext(name)[1] else name + ext)
         r = self.http.get(f"https://api.telegram.org/file/bot{self.token}/{info['file_path']}")
+        if r.status_code != 200:  # (not raise_for_status: its message would carry the URL with the bot token)
+            raise RuntimeError(f"Telegram file download: HTTP {r.status_code}")
         with open(path, "wb") as f:
             f.write(r.content)
         return path
 
-    def send(self, chat, text, buttons=None):
-        """buttons: [(label, data)] shown under the message; a tap comes back from poll() as {"button": data}."""
+    def send(self, chat, text, buttons=None, silent=False):
+        """buttons: [(label, data)] shown under the message; a tap comes back from poll() as {"button": data}.
+        silent: no sound on his phone (Karen's updates in quiet hours)."""
         for i in range(0, len(text) or 1, 4000):  # Telegram's limit is 4096 characters per message
             last = i + 4000 >= len(text)
             extra = {"reply_markup": {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in buttons]]}} \
                 if buttons and last else {}
+            if silent:
+                extra["disable_notification"] = True
             self._call("sendMessage", chat_id=chat, text=text[i:i + 4000] or "(empty)", **extra)
+
+    def send_voice(self, chat, path, caption="", seconds=0, silent=False):
+        """A voice message (OGG/Opus): plays in the chat like one he recorded himself."""
+        extra = {"duration": int(round(seconds))} if seconds else {}
+        if silent:
+            extra["disable_notification"] = "true"
+        with open(path, "rb") as f:
+            self._call("sendVoice", chat_id=chat, caption=caption[:1000], files={"voice": (os.path.basename(path), f,
+                                                                                            "audio/ogg")}, **extra)
 
     def typing(self, chat):
         try:

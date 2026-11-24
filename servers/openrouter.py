@@ -1,7 +1,7 @@
 """One private chat call for the MCP servers (camera, images, screenshots, screen agent, reports, mail ideas).
 
 Zero-data-retention only. Tried in order: the configured OpenRouter model; Groq (gpt-oss-20b for text, qwen3.8-27b
-for images; only once llm.groq_zdr is true in config.yaml, i.e. Zero Data Retention is on in their Groq account); then
+for images; only once llm.groq_zdr is true in config.yaml, i.e. Zero Data Retention is on in his Groq account); then
 OpenRouter's free zero-retention model (text only). A provider that says "out of credits" (402) rests for an hour.
 """
 import os
@@ -13,7 +13,6 @@ from openai import OpenAI
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(ROOT, ".env"))  # the servers only get the keys listed for them; Groq's lives in .env
-FREE = "inclusionai/ling-3.0-flash-sante:free"  # OpenRouter: free, zero data retention, text only; busy at times
 GROQ_TEXT, GROQ_VISION = "openai/gpt-oss-20b", "qwen/qwen3.8-27b"  # Groq tests 2026-10-10: 6/6 tools; reads images
 PROVIDERS = {"openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
              "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY")}
@@ -39,8 +38,8 @@ def _chain(model, image):
     chain = [("openrouter", model)] if model else []
     if _groq_ok():
         chain.append(("groq", GROQ_VISION if image else GROQ_TEXT))
-    if not image:
-        chain.append(("openrouter", FREE))
+    # no free OpenRouter link: none of its free models has a zero-data-retention endpoint now (ling-3.0 was withdrawn
+    # 2026-10-14; 6 others tested with zdr:true all answered 404), so private requests use only these two
     return [c for c in dict.fromkeys(chain) if os.environ.get(PROVIDERS[c[0]][1])]
 
 
@@ -54,6 +53,9 @@ def chat(model, messages, max_tokens=300, timeout=60):
     image = any(isinstance(m.get("content"), list) and any(p.get("type") == "image_url" for p in m["content"])
                 for m in messages)
     chain = _chain(model, image)
+    if not chain:
+        raise RuntimeError("No private AI provider is available: turn on Groq Zero Data Retention (llm.groq_zdr) or add "
+                           "OpenRouter credits. Tell the user that, briefly.")
     if image and (not chain or all(_rest.get(c, 0) > time.time() for c in chain)):
         raise NoVision()
     for i, (provider, m) in enumerate(chain):

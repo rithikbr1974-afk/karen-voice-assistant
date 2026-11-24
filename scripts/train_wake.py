@@ -1,8 +1,8 @@
 """Train Karen's personal wake word detector on the user's own recordings.
 
 Features: openWakeWord's speech-embedding models (models/oww), 16 frames = the last 1.28 s of audio.
-Positives: your "Karen" clips (voice_tests/karen) + Kokoro voices saying "Karen", heavily augmented
-(volume, room noise, echo, speed). Negatives: your other sentences (voice_tests/other), room sound, and Kokoro
+Positives: his "Karen" clips (voice_tests/karen) + Kokoro voices saying "Karen", heavily augmented
+(volume, room noise, echo, speed). Negatives: his other sentences (voice_tests/other), room sound, and Kokoro
 voices saying everyday and sound-alike sentences ("get in", "Karan", "garden"...).
 Output: models/karen_personal.pkl -> used by core/wake.py PersonalWake (wake.engine: personal).
 
@@ -21,7 +21,7 @@ import numpy as np
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, ".")
 RATE, WIN = 16000, 32000  # 2 s windows -> 16 embedding frames
-DATA = sys.argv[1] if len(sys.argv) > 1 else "voice_tests"  # The user's recordings
+DATA = sys.argv[1] if len(sys.argv) > 1 else "voice_tests"  # the user's recordings
 OUT = "models/karen_personal.pkl"
 CACHE = "models/wake_cache"
 rng = np.random.default_rng(7)
@@ -173,20 +173,20 @@ def main():
     his_neg += [trim(load(p)[RATE * 3 // 2:]) for d in sessions for p in sorted(glob.glob(f"{d}/commands/*.wav"))
                 if len(load(p)) > RATE * 2]
     his_neg += [load(p) for p in sorted(glob.glob(f"{DATA}/false_wakes/*.wav"))]  # sounds that woke her by mistake
-    rooms = [p for p in [f"{DATA}/room.wav"] + sorted(glob.glob(f"{DATA}/session*/room*.wav")) if os.path.exists(p)]
-    if len(his_pos) < 15 or not rooms:
-        sys.exit("Record first: python scripts/record_session.py  (see docs/TRAINING.md)")
+    if len(his_pos) < 15 or not os.path.exists(f"{DATA}/room.wav"):
+        sys.exit("Record first: python scripts/record_samples.py wake")
     his_neg += [trim(load(f"{DATA}/10.wav"))] if os.path.exists(f"{DATA}/10.wav") else []
     # room sound: the quiet room, plus the room with music playing (the background she must still hear "Karen" over)
-    room = np.concatenate([load(p) for p in rooms])
+    room = np.concatenate([load(p) for p in [f"{DATA}/room.wav"] + sorted(glob.glob(f"{DATA}/session*/room*.wav"))
+                           if os.path.exists(p)])
     room = np.concatenate([room, rng.standard_normal(RATE * 5).astype(np.float32) * 0.003])
-    print(f"Your recordings: {len(his_pos)} 'Karen' clips, {len(his_neg)} other sentences, {len(room) / RATE:.0f}s room sound")
+    print(f"The user: {len(his_pos)} 'Karen' clips, {len(his_neg)} other sentences, {len(room) / RATE:.0f}s room sound")
 
     print("Making synthetic voices (cached after the first run)...")
     syn_pos = [trim(x) for x in synth(POS_TEXT, VOICES, "pos")]
     syn_neg = [trim(x) for x in synth(NEG_TEXT, VOICES[::2], "neg")]
 
-    # hold out 25% of your own clips to measure honestly
+    # hold out 25% of his own clips to measure honestly
     random.shuffle(his_pos)
     random.shuffle(his_neg)
     k = max(4, len(his_pos) // 4)
@@ -223,7 +223,7 @@ def main():
             return window(np.concatenate([xa, gap, follow])[:len(xa) + after], room, end_at=WIN)
         return window(xa, room, end_at=WIN - after)
 
-    # the slowest step, cached until your recordings (or this recipe: v2) change
+    # the slowest step, cached until his recordings (or this recipe: v2) change
     sig = "v2 " + str(sorted((os.path.relpath(p, DATA), os.path.getsize(p))
                              for p in glob.glob(f"{DATA}/**/*.wav", recursive=True)))
     emb_path = f"{CACHE}/base_embeddings.npz"
@@ -266,8 +266,8 @@ def main():
         X = np.concatenate([X, hard, hard, easy])  # hard ones twice: they matter most
         y = np.concatenate([y, np.zeros(2 * len(hard) + len(easy))])
 
-    # pick threshold and hit rule: most of your held-out "Karen"s at ~0 false wakes on held-out speech.
-    # Among equally good thresholds take the lowest (your voice on another day scores lower than the
+    # pick threshold and hit rule: most of his held-out "Karen"s at ~0 false wakes on held-out speech.
+    # Among equally good thresholds take the lowest (his voice on another day scores lower than the
     # same-session clips used here), then add a small safety margin above the last false wake.
     vs = model.predict_proba(val_stream)[:, 1]
     vp = [model.predict_proba(w)[:, 1] for w in val_pos_windows]

@@ -54,7 +54,7 @@ def product_image(topic):
     from ddgs import DDGS
     from PIL import Image
     try:
-        hits = DDGS(timeout=10).images(topic, region="in-en", max_results=15)
+        hits = DDGS(timeout=10).images(topic, region="in-en", max_results=15, backend="bing")
     except Exception:
         return None
     for h in hits:
@@ -75,24 +75,13 @@ def product_image(topic):
     return None
 
 
-def _country():
-    """explore.country in config.yaml (set by setup.py): prices are given for that country."""
-    try:
-        import yaml
-        cfg = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "..", "..", "config.yaml"), encoding="utf-8"))
-        return (cfg.get("explore") or {}).get("country") or ""
-    except Exception:
-        return ""
-
-
-COUNTRY = _country()
-PROMPT = """Write a research report about "{topic}" for a reader in {country} using ONLY the sources below.
+PROMPT = """Write a research report about "{topic}" for the user using ONLY the sources below.
 Reply with ONE JSON object, nothing else:
 {{"title": "<name of the product/topic>", "subtitle": "<one line: what it is>",
  "summary": "<4-6 sentences>", "facts_title": "<'Key specs' for a product, else 'Key facts'>",
  "facts": [["<label>", "<value>"], ... up to 14],
  "pros": ["..."], "cons": ["..."],
- "price": "<price range in {country} in local currency with where to buy, or '' if not a product>",
+ "price": "<price range in India in rupees with where to buy, or '' if not a product>",
  "alternatives": [{{"name": "...", "why": "<short>"}}] (2-3, or [] if not a product),
  "verdict": "<2-3 sentences>",
  "spoken": "<one short sentence summing it up, to be said aloud>"}}
@@ -105,7 +94,7 @@ SOURCES:
 def write(topic, pages, chat, model=None):
     sources = "\n\n".join(f"[{i}] {u}\n{t}" for i, (u, t) in enumerate(pages, 1))
     raw = chat(model, max_tokens=2500, timeout=120,
-               messages=[{"role": "user", "content": PROMPT.format(topic=topic, sources=sources, country=COUNTRY or "the reader's country")}])
+               messages=[{"role": "user", "content": PROMPT.format(topic=topic, sources=sources)}])
     try:
         return json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
     except ValueError:
@@ -152,7 +141,7 @@ def render(data, pages, image, out_dir=REPORTS, edge=None):
         parts.append(f"""<section><h2>Pros and cons</h2><div class="cols"><div><h3>👍 Pros</h3><ul>{li(data.get('pros'))}</ul></div>
 <div><h3>👎 Cons</h3><ul>{li(data.get('cons'))}</ul></div></div></section>""")
     if data.get("price"):
-        parts.append(f"<section><h2>Price{" in " + e(COUNTRY) if COUNTRY else ""}</h2><p>{e(data['price'])}</p></section>")
+        parts.append(f"<section><h2>Price in India</h2><p>{e(data['price'])}</p></section>")
     if data.get("alternatives"):
         alts = "".join(f"<li><b>{e(a.get('name'))}</b>: {e(a.get('why'))}</li>" for a in data["alternatives"]
                        if isinstance(a, dict))
@@ -170,7 +159,7 @@ def render(data, pages, image, out_dir=REPORTS, edge=None):
         src_html = os.path.join(tmp, "report.html")
         with open(src_html, "w", encoding="utf-8") as f:
             f.write(page)
-        profile = os.path.join(os.environ.get("LOCALAPPDATA", tmp), "Karen", "edge-print")  # not their Edge profile
+        profile = os.path.join(os.environ.get("LOCALAPPDATA", tmp), "Karen", "edge-print")  # not his Edge profile
         subprocess.run([edge, "--headless=new", "--disable-gpu", "--no-first-run", f"--user-data-dir={profile}",
                         "--no-pdf-header-footer", f"--print-to-pdf={pdf}", "file:///" + src_html.replace("\\", "/")],
                        capture_output=True, timeout=90, creationflags=0x08000000)

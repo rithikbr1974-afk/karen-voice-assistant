@@ -43,7 +43,7 @@ def pages():
 
 
 def find(page):
-    """The page they meant: exact name, else the only page whose name contains it."""
+    """The page he meant: exact name, else the only page whose name contains it."""
     try:
         name, full = path(page)
         if os.path.exists(full):

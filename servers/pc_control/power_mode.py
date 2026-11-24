@@ -26,9 +26,9 @@ RISKY = [
     (r"Move-Item|\bmove\b\s|shutil\.move|os\.rename|Rename-Item|\.rename\(|\.replace\(\s*['\"]?[A-Za-z]:",
      "move or rename files"),
 ]
-CUSTOM = """You are running on the user's Windows PC on behalf of their voice assistant Karen.
+CUSTOM = """You are running on the user's Windows PC on behalf of his voice assistant Karen.
 - Prefer Python. Keep each code block small and do one step at a time.
-- Work inside their user folders (Desktop, Documents, Downloads, Pictures, Music, Videos) unless the task says otherwise.
+- Work inside his user folders (Desktop, Documents, Downloads, Pictures, Music, Videos) unless the task says otherwise.
 - Never delete permanently: move things to the Recycle Bin instead (send2trash). Never touch system folders,
   the registry, drivers, antivirus or security settings, and never install software unless the task asks for it.
 - When the task is done, reply with ONE short plain sentence saying what you did (it will be spoken aloud)."""
@@ -71,8 +71,8 @@ def main():
     oi.llm.completions = completions
 
     folders = json.loads(os.environ.get("POWER_MODE_FOLDERS", "{}"))
-    if folders:  # their Desktop and Pictures are on another drive (OneDrive); saves the model hunting for them
-        oi.custom_instructions += "\n- Their folders: " + "; ".join(f"{k} = {v}" for k, v in folders.items())
+    if folders:  # his Desktop and Pictures are on another drive (OneDrive); saves the model hunting for them
+        oi.custom_instructions += "\n- His folders: " + "; ".join(f"{k} = {v}" for k, v in folders.items())
 
     said, runs = "", 0
     stream = oi.chat(task, display=False, stream=True)

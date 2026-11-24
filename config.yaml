@@ -1,14 +1,10 @@
-# Karen's settings. setup.py (run setup.bat) fills in the user section and turns features on or off.
-user:
-  name: ""                # what Karen calls you
-  accent: ""              # optional, e.g. " of Indian-accented English" (helps the AI guess misheard words)
-
 llm:
   backends:   # OpenAI-compatible APIs, tried in order; the next one answers if one fails (quota, outage)
     - name: gemini            # free tier; Google may use free-tier prompts to improve its products
       base_url: https://generativelanguage.googleapis.com/v1beta/openai/
       key_env: GEMINI_API_KEY
-      model: gemini-3.5-flash-lite   # ~0.7 s to first word, steady; tools work. Bigger Flash models hit free quota.
+      model: gemini-3.1-flash-lite   # 2026-10-24: 3.5-flash-lite took 10-24 s or timed out; 3.1-lite 1.6-2.0 s
+      timeout: 8            # it answers in ~1 s or not at all (APITimeoutError cost every reply 30 s before Groq took over)
       params: {reasoning_effort: minimal}
     - name: groq              # free (1,000 requests/day, 30/min), very fast; JARVIS's AI. Tested 2026-10-10: 6/6 tool calls,
       base_url: https://api.groq.com/openai/v1   # ~0.5 s, chat first word 0.46 s (gpt-oss-120b 5/6, qwen3.8-27b 3/6)
@@ -17,28 +13,28 @@ llm:
       retries: 0            # a 429 (8K tokens/min) moves on to the next backend at once; retrying waited ~70 s
       timeout: 20
       params: {reasoning_effort: low}
-    - name: openrouter        # paid, pennies (needs OpenRouter credits); fallback, and private backend for tool requests
+    - name: groq-120b         # same key, same Zero Data Retention, its own 8K tokens/min: free cover when gpt-oss-20b's
+      base_url: https://api.groq.com/openai/v1   # minute runs out (2026-11-08: 4/4 tool calls, ~0.5 s). OpenRouter
+      key_env: GROQ_API_KEY                      # had no credits, so that 429 used to fail the request outright
+      model: openai/gpt-oss-120b
+      retries: 0
+      timeout: 20
+      params: {reasoning_effort: low}
+    - name: openrouter       # paid, pennies (needs OpenRouter credits); fallback, and private backend for tool requests
       base_url: https://openrouter.ai/api/v1
       key_env: OPENROUTER_API_KEY
       model: deepseek/deepseek-v4.1-flash
       params: {extra_body: {reasoning: {enabled: false}, provider: {zdr: true}}}   # zero-data-retention providers only
-    - name: openrouter-free   # free (no credits, ~50 requests/day), zero data retention, tools (text only); busy at times
-      base_url: https://openrouter.ai/api/v1
-      key_env: OPENROUTER_API_KEY
-      model: inclusionai/ling-3.0-flash-sante:free   # qwen3.8-27b:free was withdrawn 2026-10-06; ling: 4/4 tool calls
-      retries: 3              # the free pool often answers 429 "rate-limited upstream"; retried with backoff
-      timeout: 15             # give up on a stuck try quickly (worst case about a minute, not minutes)
-      params: {extra_body: {reasoning: {enabled: false}, provider: {zdr: true}}}
-  private_backends: [openrouter, openrouter-free]   # requests that use tools (email, calendar, files) only go here
+  private_backends: [openrouter]   # requests that use tools (email, calendar, files) only go here
   # Groq keeps requests up to 30 days for abuse checks unless Zero Data Retention is on (console.groq.com >
   # Settings > Data Controls). Set true once it's on: Groq then also takes tool requests and the image features.
-  groq_zdr: false  # true once Zero Data Retention is on in your Groq account
+  groq_zdr: false  # true once Zero Data Retention is on in Groq (CHANGE_SETTINGS.bat asks)
   max_tool_rounds: 5
   max_tokens: 300
   history_turns: 6
   system_prompt: >-
-    You are Karen, {user}'s voice assistant. Their words come from speech recognition{accent} and may
-    contain misheard words; infer what they most likely meant.
+    You are Karen, a personal voice assistant. The user's words come from speech recognition and may contain
+    misheard words; infer what they most likely meant.
     You have no live data (weather, news, prices) unless a tool gives it to you; say so instead of guessing.
     Answer in one to three short spoken sentences. Plain text only: no markdown, lists, or emojis.
     Only end with a question when you need their answer; never add offers like "anything else?".
@@ -52,24 +48,36 @@ audio:
   duck_level: 0.15        # other apps' sound drops to 15% while Karen listens and talks (1 = off)
 
 wake:
-  engine: personal        # personal = trained on your voice (scripts/train_wake.py) | oww | whisper
+  engine: personal        # personal = trained on the user's voice (scripts/train_wake.py) | oww | whisper
   personal_model: models/karen_personal.pkl   # falls back to whisper if missing
-  oww_model: models/karen.onnx           # optional openWakeWord model; falls back to whisper if missing
+  study_model: models/hey_mam_personal.pkl  # study mode's "Hey Mam" (train_wake.py --word hey_mam); Karen until then
+  oww_model: models/karen.onnx           # trained on Colab; falls back to whisper if missing
   threshold: 0.5
-  verifier: models/karen_verifier.pkl    # optional, trained on your own "Karen" clips
+  verifier: models/karen_verifier.pkl    # optional, trained on the user's own "Karen" clips
   verifier_threshold: 0.3
-  patience: 2             # personal wake word: hits in a row (160 ms each). 3 = fewer false wakes, more missed ones
+  patience: 2             # personal wake word: hits in a row (160 ms each). 2 catches 37/40 of his "Karen"s, 3 only
+                          # 29/40 (2026-10-09 session test); a false wake is just a soft chime, so 2 is the better trade
+  voice_gate: 0.30        # only the user's voice wakes her (core.wake.VoiceGate, models/cortex/wake_voice.npy). 0.58
+                          # blocked him: live his calls score 0.31-0.54, the TV 0.06-0.28 (2026-11-09); 0 = off
   continue_s: 1.2         # after the wake word, wait this long for "Karen, <request>" before the chime
   command_timeout_s: 5    # after the chime, how long to wait for the request
   followup_s: 6           # after Karen asks a question, how long she listens for the answer (no wake word)
   model: tiny.en          # whisper engine only
   words: [karen, karin, keren, karren, kieran, korinne]   # spellings Whisper uses; a leading C counts as K
 
+cortex:                   # Karen's Cortex (core/cortex, docs/CORTEX.md): local brain-inspired network on what she hears
+  enabled: false          # off by default: when on, she writes down what's said near the PC (kept 24 h)
+  ear_model: tiny.en      # overheard speech is transcribed on this PC only, never sent to Groq
+  text_hours: 24          # overheard text is kept this long (his choice, 2026-10-28)
+  days: 14                # episodes and their audio clips are kept this long, for learning
+  audio_mb: 300           # cap for data/cortex/clips (E: was 95% full on 2026-10-28)
+  attention: shadow       # "was that for me?": shadow = decide and show it, but still answer | on = stay quiet | off
+
 stt:
-  model: small.en         # local fallback; on a test voice 29% word errors vs 45% for base.en, ~3 s per request
+  model: small.en         # best accuracy on the user's voice (29% vs 45% word errors for base.en), ~3 s per request
   compute_type: int8
   threads: 8
-  cloud:                  # Groq Whisper first (needs GROQ_API_KEY; remove this block for local only), small.en on failure
+  cloud:                  # Groq Whisper first (his choice 2026-10-12; Groq ZDR on), small.en above on any failure
     model: whisper-large-v3
     timeout: 5
 
@@ -85,10 +93,11 @@ ui:
 mcp_servers:   # each one is started over stdio; its tools are only sent to the LLM when triggers match
   google:      # github.com/taylorwilsdon/google_workspace_mcp (smallest "core" tier)
     label: Google Workspace
-    enabled: false   # setup.py turns this on once the Google sign-in keys are in .env (docs/SETUP.md, step 6)
+    short: Google
     command: uvx
     # "complete" tier for Gmail's label/filter tools (organiser); every other non-core tool is disabled below
-    args: [workspace-mcp@1.30.1, --single-user, --tool-tier, complete, --tools, gmail, calendar, drive, docs, sheets,
+    # 64-bit Python pinned: a 32-bit uv Python (installed 2026-10-26) was picked and cryptography has no win32 wheel
+    args: [--python, cpython-3.12-windows-x86_64-none, workspace-mcp@1.30.1, --single-user, --tool-tier, complete, --tools, gmail, calendar, drive, docs, sheets,
            --disabled-tools, import_to_google_slides, import_to_google_doc, import_to_google_sheets,
            get_drive_file_download_url,
            get_gmail_attachment_content, get_gmail_thread_content, draft_gmail_message,
@@ -130,9 +139,12 @@ mcp_servers:   # each one is started over stdio; its tools are only sent to the 
 
   pc:          # servers/pc_control/server.py: apps, sound, web, system, windows, keys, clicks, files, settings, power mode
     label: PC control
+    short: PC
     command: "{python}"
     args: [servers/pc_control/server.py]
     timeout: 300           # power mode can take a few minutes
+    env:
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"   # screen descriptions and power mode (zero-retention providers)
     triggers:   # tool groups, so a request only sends the tools it needs
       "*window*|show_desktop|press_keys|click|scroll|read_window|type_text|clipboard":
         [window, windows, desktop, minimize, minimise, maximize, maximise, switch to, snap, click, press, shortcut,
@@ -163,7 +175,7 @@ mcp_servers:   # each one is started over stdio; its tools are only sent to the 
 
   alexa:       # servers/alexa/server.py: smart home through Amazon Alexa (unofficial AlexaPy; sign in: scripts/alexa_login.py)
     label: Smart home (Alexa)
-    enabled: false   # turn on after: python scripts/alexa_login.py
+    short: Alexa
     command: "{python}"
     args: [servers/alexa/server.py]
     triggers:
@@ -174,6 +186,7 @@ mcp_servers:   # each one is started over stdio; its tools are only sent to the 
 
   daily:       # servers/daily/server.py: weather, news, reminders/timers, memory, briefing (free, no keys)
     label: Everyday (weather, news, reminders, memory)
+    short: Everyday
     command: "{python}"
     args: [servers/daily/server.py]
     triggers:
@@ -189,20 +202,26 @@ mcp_servers:   # each one is started over stdio; its tools are only sent to the 
                                     personality, persona, from now on, here after, hereafter, stop talking like,
                                     be normal, normal karen, your character, your style, in character, love mode,
                                     work mode, full work, both mode, lite love, light love, romantic mode,
-                                    balanced mode, girlfriend mode, professional mode]
+                                    balanced mode, girlfriend mode, professional mode, toxic mode, toxic,
+                                    love fun, lovefun, obsessed mode, jealous mode]
 
   files:       # servers/files/server.py: read, describe, convert, merge/split, resize, show (local and free)
     label: Files (read, convert, show)
+    short: Files
     command: "{python}"
     args: [servers/files/server.py]
     timeout: 180          # Office conversions can take a while
+    env:
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"   # describe_image only (zero-retention vision)
     triggers:
       "*": [pdf, file, files, document, doc, docx, word file, image, photo, picture, convert, merge, split, pages,
             compress, resize, upload, uploaded, attached, attachment, show me, preview, open it, summarise this,
-            summarize this, this file, csv, spreadsheet]
+            summarize this, this file, csv, spreadsheet, excel, xlsx, powerpoint, pptx, slides, audio, voice note,
+            recording, mp3, video, transcribe, transcript, listen to, what does it say, what's in this]
 
   dev:         # servers/dev/server.py: projects, VS Code, fixed git commands (commit/push ask first)
     label: Developer (projects, git)
+    short: Developer
     command: "{python}"
     args: [servers/dev/server.py]
     triggers:
@@ -212,20 +231,27 @@ mcp_servers:   # each one is started over stdio; its tools are only sent to the 
 
   explore:     # servers/explore/server.py: live webcam look (zero-retention vision) and research mode (browser windows)
     label: Camera and research
+    short: Camera
     command: "{python}"
     args: [servers/explore/server.py]
     timeout: 240          # research reports take about a minute
+    env:
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"   # look, reports, summaries (zero data retention)
     triggers:
       "look|camera_off": [camera, webcam, web cam, what am i holding, in my hand, holding, what do you see, can you see,
                           look at this, look at, see this, what is this, what's this, read this label, this product]
       "research_*": [research, power research, deep dive, find everything about, look into]
       "research_report|research_summary": [report, research report, pdf report, scan this, scan it, summarise my research,
                                            summarize my research, save my research, research summary, make a pdf]
-      "work_mode*": [coding mode, study mode, chill mode, start coding, start studying, time to code, time to study,
-                     coding mode off, study mode off, chill mode off]   # "work mode" = Karen's personality mode
+      "find_photo|create_picture": [picture, pictures, photo, photos, pic, pics, image, images, wallpaper, draw, drawing, sketch,
+                  generate an image, make an image, create an image, illustration, send me a, show me a, show me an,
+                  what does, look like]
+      "work_mode*": [coding mode, chill mode, start coding, time to code,
+                     coding mode off, chill mode off]   # "work mode" = Karen's personality mode; "study mode" = core/study.py
 
   dots:        # servers/dots/server.py: Spaces (Markdown pages), web reading for the Researcher, Dots and their schedules
     label: Dots and Spaces
+    short: Dots
     command: "{python}"
     args: [servers/dots/server.py]
     timeout: 120
@@ -235,8 +261,9 @@ mcp_servers:   # each one is started over stdio; its tools are only sent to the 
       "*dot*": [dot, dots, researcher, writer, coder, organiser, organizer, helpers, specialist, every morning,
                 every day, every evening, every weekday, scheduled task, scheduled tasks]
 
-  jarvis:      # servers/jarvis/server.py: health, productivity, PDF/zip tools, translator voice, recorders
+  jarvis:      # servers/jarvis/server.py: JARVIS features rebuilt for Karen (health, productivity; more in batches)
     label: JARVIS tools
+    short: JARVIS
     command: "{python}"
     args: [servers/jarvis/server.py]
     triggers:
@@ -265,35 +292,134 @@ mcp_servers:   # each one is started over stdio; its tools are only sent to the 
                             in chinese, in mandarin, in japanese, in german, in kannada, in tamil, how do you say,
                             how do i say, say it in]
       "*_recording|recording_status": [record, recording, voice memo, voice note, screen record, record my screen,
-                                       record the screen, stop recording]
+                                       record the screen, stop recording, video, vid, webcam video, record me]
+      "open_camera": [open cam, open camera, open the camera, open my camera, camera app, open webcam, selfie]
 
+  extras:      # servers/extras/server.py: expenses, countdowns, exchange rates, YouTube transcripts, activity report
+    label: Everyday extras
+    short: Extras
+    command: "{python}"
+    args: [servers/extras/server.py]
+    triggers:
+      "*expense*": [spent, spend, expense, expenses, paid, bought, cost me, rupees, rs, budget, how much did i,
+                    my spending, money went]
+      "*countdown*": [countdown, count down, days until, days left, how many days, days to go]
+      "exchange_rate": [dollar, dollars, euro, euros, pound, dirham, yen, exchange rate, convert currency, usd, inr,
+                        in rupees, to rupees, currency]
+      "youtube_transcript": [youtube.com, youtu.be, youtube video, this video, summarise the video, summarize the video,
+                             what does the video say]
+      "activity_report": [what did you do, what did i ask, what have you done, activity, your day, today's log,
+                          what happened today]
+
+  friday:      # servers/friday/server.py: Friday's abilities rebuilt (flights, wallpaper, CSV/Excel/JSON tables)
+    label: Friday tools (flights, wallpaper, data)
+    short: Friday
+    command: "{python}"
+    args: [servers/friday/server.py]
+    timeout: 120          # Google Flights is rendered by headless Edge (~8 s)
+    triggers:
+      "find_flights": [flight, flights, fly to, flying to, airfare, air fare, plane ticket, air ticket, airline,
+                       indigo, air india, akasa, cheapest flight]
+      "*wallpaper*": [wallpaper, background picture, desktop background, desktop picture, lock screen picture]
+      "data_*|convert_data": [csv, excel, xlsx, spreadsheet, json, column, columns, rows, total of, average of,
+                              group by, sort by, filter the, analyse the data, analyze the data, data file]
+
+  media:       # servers/media/server.py: play songs in the YouTube Music app, pause/skip, Google Maps in the island
+    label: Music and maps
+    short: Music
+    command: "{python}"
+    args: [servers/media/server.py]
+    triggers:
+      "play_music|music|now_playing": [play, song, songs, music, playlist, album, lofi, track, pause, resume, stop the,
+                                       stop music, stop playing, skip, next song, previous song, what's playing,
+                                       what is playing, which song, this song]
+      "show_map": [map, maps, where is, directions, direction, route, how far, way to, way from, the way, navigate,
+                   location of, how do i get to, how to reach]
+
+  hands:       # servers/hands/server.py -> hands.py: 3D viewer + phone mirror with webcam hand gestures (MediaPipe, local)
+    label: Hand gestures (3D, phone mirror)
+    short: Gestures
+    command: "{python}"
+    args: [servers/hands/server.py]
+    triggers:
+      "open_3d_viewer": [3d, 3-d, three d, 3d model, glb, gltf, fbx, obj file, stl, vrm, 3d viewer, model viewer,
+                         hand control, hand gesture, hand gestures, with my hands, hand tracking]
+      "mirror_phone": [mirror, mirroring, cast my phone, phone on my laptop, phone on the laptop, phone screen on,
+                       control my phone with my hands, phone with my hands, phone with hands]
+      "hand_training": [train my hands, hand training, gesture training, train the gestures, train hand tracking,
+                        hand tracking training]
+      "close_hands": [stop mirroring, close the mirror, close hands, close the 3d, close the viewer, stop hand control,
+                      close the hands window]
+
+  # artemis: Google's ARTEMIS phone agent (servers/artemis/server.py) needs its own install first; then copy
+  # the block from docs/GETTING_STARTED.md here.
   phone:       # servers/phone/server.py: Android over adb wireless debugging (pair once: scripts/phone_pair.py)
     label: Phone (Android)
-    enabled: false   # turn on after pairing: python scripts/phone_pair.py
+    short: Phone
     command: "{python}"
     args: [servers/phone/server.py]
     timeout: 240          # phone_operate / sending can take a minute or two
+    env:
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"   # phone_operate's step-by-step model (text only, zero retention)
     triggers:
+      "whatsapp_me": [whatsapp me, send me, message me, text me on whatsapp, ping me, send it to me, send that to me,
+                      to my whatsapp, on my whatsapp]
       "phone_call|phone_end_call|phone_answer_call|phone_call_log|phone_find_contact|phone_*sms":
         [call, ring, dial, hang up, end the call, cut the call, pick up, answer the call, missed call, who called,
-         sms, text message, send a text, a text to, text to, number of, phone number, contact number]
+         sms, text message, send a text, a text to, text to, number of, phone number, contact number,
+         second phone, other phone, other number, second number, spare sim, old phone]
+      "find_my_phone": [find my phone, where is my phone, where's my phone, ring my phone, lost my phone, can't find my phone]
       "*": [phone, mobile, my phone, on my phone, from my phone, android, notification, notifications]
+  study:       # servers/study/server.py: study mode's teacher (visualizer, lessons, videos) for the study window
+    label: Study (visualizer, lessons)
+    short: Study
+    command: "{python}"
+    args: [servers/study/server.py]
+    timeout: 240          # Claude's interactive explainers take up to ~2 minutes
+    triggers:             # in study mode all study tools are offered anyway (main.answer)
+      "visualize": [visualize, visualise, visualization, diagram, mind map, mindmap, flowchart, flow chart, timeline,
+                    concept map, chart of, graph of, show me how, formula sheet, explainer, animation of, animate]
+      "teach|play_video": [teach me, teach, help me learn, lesson on, lesson about, learn about, explain with videos,
+                           video on, video about, video explaining, tutorial on]
+  meeting:     # servers/meeting/server.py: meeting notes (recording, live transcript, final notes); not study mode
+    label: Meeting notes
+    short: Meetings
+    command: "{python}"
+    args: [servers/meeting/server.py]
+    timeout: 900          # stop = last transcripts + cuts + slides read + notes in parts (Groq: 8K tokens/min): 1-7 min
+    triggers:             # "start / stop taking meeting notes" are caught before the LLM (core/meeting.py)
+      "start_meeting_notes|stop_meeting_notes|meeting_notes_so_far|show_meeting_notes|past_meetings":
+        [meeting notes, meeting minutes, notes of the meeting, record the meeting, record this meeting,
+         recording the meeting, in the meeting, during the meeting, the meeting so far, in the lecture, in the class,
+         on the call, last meeting, action items, past meeting, previous meeting, meeting on, meeting yesterday,
+         meeting today, meeting last, lecture notes, the lecture, that meeting, the meeting]
+      "meeting_followup_email": [follow-up, follow up, followup, recap email, meeting email, email the notes,
+                                 mail the notes, send the notes]
+  brain:       # servers/brain/server.py: the Cortex's hearing memory (what was said around her, last 24 h)
+    label: Hearing memory
+    short: Hearing
+    command: "{python}"
+    args: [servers/brain/server.py]
+    triggers:
+      "heard|hearing_status": [heard, hear that, did you hear, what did he say, what did she say, what did they say,
+                               what was he saying, what was she saying, what were they saying, just said, said just now,
+                               a minute ago, on tv, the tv, that video, the video say, video said, overheard,
+                               what was i saying, what did i say, hearing memory]
+      "delete_heard": [forget what you heard, erase what you heard, delete what you heard, clear your hearing,
+                       delete hearing memory, erase hearing memory]
 
-confirm: ["jarvis__tidy_folder_apply", "jarvis__batch_rename_apply", "*batch_modify_gmail*", "*manage_gmail_filter*", "*manage_gmail_label*", "*send*", "*delete*", "*trash*", "*manage_event*", "*shutdown*", "*restart*", "pc__sleep", "pc__power_mode", "pc__clean_junk",
+confirm: ["artemis__phone_do", "jarvis__tidy_folder_apply", "jarvis__batch_rename_apply", "*batch_modify_gmail*", "*manage_gmail_filter*", "*manage_gmail_label*", "*send*", "*delete*", "*trash*", "*manage_event*", "*shutdown*", "*restart*", "pc__sleep", "pc__power_mode", "pc__clean_junk",
           "dev__git_commit", "dev__git_push", "phone__phone_call", "alexa__power_appliance", "alexa__alexa_command", "alexa__run_routine"]   # spoken yes/no first
 
-avatar:                  # avatar mode characters (Settings > Avatar). Model files stay in models/ (git-ignored)
+avatar:                  # avatar mode characters (Settings > Avatar); more in docs/AVATARS.md
   characters:
     - id: karen
       name: Karen (girl)
-      file: models/karen.vrm      # VRM: full face, expressions and lip-sync (scripts/download_models.py fetches it)
-    # Add your own: a VRM from VRoid Hub (check its licence) or a Mixamo-rigged FBX, e.g.
-    # - {id: fox, name: Fox girl, file: models/avatars/fox.vrm, credit: "the creator's name"}
-    # - {id: hero, name: Hero, file: models/hero/hero_rigged.fbx, textures: models/hero}
-    # romance: false turns off the kiss/bashful reactions for a character
+      file: models/karen.vrm                  # VRM: full face, expressions and lip-sync (pixiv's sample model)
+    # your own VRM or Mixamo-rigged FBX characters:
+    # - {id: mia, name: Mia, file: models/avatars/mia.vrm, credit: "the model's author"}
 
 explore:
-  country: ""             # research reports give prices for this country, e.g. India
   camera: 0              # webcam index (0 = Integrated Webcam)
   camera_on_s: 60        # the camera stays on this long after a look, for follow-ups, then turns off
   vision_model: deepseek/deepseek-v4.1-flash
@@ -302,45 +428,100 @@ explore:
   # report_model: deepseek/deepseek-v4.1-flash   # writes reports/summaries (unset = the same free fallback chain)
   modes:                 # work modes: "coding mode on" ... "mode off". project = folder opened in VS Code,
     coding:              # apps = programs/URIs to start, urls = one browser window, music = minimized window
-      project: ""        # a folder to open in VS Code, e.g. "%USERPROFILE%/source/repos/my-app"
+      project: ""          # a folder to open in VS Code, e.g. "%USERPROFILE%/Documents/my-project"
       urls: [https://github.com, https://stackoverflow.com, https://docs.python.org/3/]
       music: https://www.youtube.com/watch?v=jfKfPfyJRdk          # lofi hip hop radio (live)
-    study:
-      urls: [https://docs.new, https://en.wikipedia.org, https://www.khanacademy.org]
-      music: https://www.youtube.com/watch?v=jfKfPfyJRdk
     chill:
       urls: [https://www.youtube.com]
       music: https://music.youtube.com
 
 phone:
-  device: ""             # adb serial if several devices are connected; empty = the only one
+  device: ""             # adb serial of the main phone; empty = whichever connected phone isn't `second`
+  second: []             # optional second phone (adb serials) for "call from the other number"
   max_steps: 14          # phone_operate actions per task
   settle_s: 1.2          # wait after each tap before reading the screen again
   # model: deepseek/deepseek-v4.1-flash   # unset = the free zero-retention fallback
 
+artemis:                 # the phone agent (github.com/google/artemis, installed by hand in dir with its own .env and Gemini key)
+  dir: ""                # where you installed github.com/google/artemis
+  profile: flash         # flash = fast, ~3-5 s per step; pro = plans and verifies, ~15-40 s per step
+  timeout_s: 240         # a task is stopped after this long
+
 phone_watch:             # voice Karen says incoming calls and new messages from the paired phone (core/phonewatch.py)
-  enabled: false          # turn on after pairing your phone (scripts/phone_pair.py)
+  enabled: true
   calls: true            # "Alex is calling. Pick up or reject?"
   messages: true         # "WhatsApp from Mom: ..." (security codes hidden; only "New WhatsApp" while face-locked)
   apps: [com.whatsapp, com.whatsapp.w4b, com.google.android.apps.messaging]   # not Telegram: Remote's own chats
   quiet: "23:00-07:00"   # messages are only shown, not spoken, in this window (calls always speak)
 
-morning:                 # the first time she's with you each morning (start-up or after your first request), unasked
+island:                  # Karen Island (core/island.py): small capsule at the top centre; grows for replies, music, maps
+  enabled: true
+  top: 8                 # distance from the top of the screen (logical px)
+  window_on_start: false # the big window stays hidden until opened from the island (right-click) or the tray
+  hotkeys:               # global shortcuts (Ctrl+Alt+Space was already taken by another app on his PC)
+    ask: ctrl+alt+k      # open the island's ask box from anywhere
+    talk: ctrl+alt+t     # push-to-talk, no wake word
+
+media:
+  ytmusic_app_id: cinhimbnkkaeohfgghhklpknlkffjgod   # the YouTube Music web app in Edge
+
+meeting:                 # after a meeting's notes are written (servers/meeting): where they go
+  telegram: true          # the notes PDF + summary to his paired Telegram (Karen's bot)
+  phone_note: true        # a note with the summary and action items in data/notes.json (syncs to the phone app)
+night:                   # night mode (voice Karen): quieter voice and one-or-two-sentence answers
+  window: "23:00-07:00"  # empty = off
+  volume: 0.5            # 1 = normal loudness
+
+evening:                 # Karen Remote sends a wrap-up to Telegram once a day (tomorrow's calendar, to-dos, reminders, mail)
+  enabled: true
+  time: "21:00"
+
+alerts:                  # Karen Remote warns on Telegram once each time a line is crossed (checked every 10 min)
+  pc_battery: 15         # % on battery power
+  disk_free_gb: 3        # C: drive free space
+  phone_battery: 15      # % (when the phone is on adb)
+
+morning:                 # the first time she's with him each morning (start-up or after his first request), unasked
   enabled: true
   window: "05:00-11:30"
   request: "Good morning! Give me my morning briefing: today's weather, top news, today's reminders and calendar, and
     any important new emails. Keep it short and friendly."
 
 face:                    # face unlock (core/face.py; enroll: scripts/enroll_face.py; on/off: Settings > Face unlock)
-  threshold: 0.42        # SFace cosine score that counts as you (OpenCV suggests 0.363; higher = stricter)
-  check_s: 8             # how long she looks for your face before giving up
-  relock_min: 30         # after this long with no requests, the next one needs your face again
+  threshold: 0.42        # SFace cosine score that counts as the user (OpenCV suggests 0.363; higher = stricter)
+  check_s: 8             # how long she looks for his face before giving up
+  relock_min: 30         # after this long with no requests, the next one needs his face again
+  intruder_alert: true   # a face that isn't his: photo to data/intruders (last 20) + Telegram, at most every 5 min
 
 remote:                  # Karen Remote (remote.py): Telegram / WhatsApp chat from the phone
-  mail_reminders: true   # scan new Gmail for dates and suggest reminders (tap ✅/❌ in Telegram)
-  mail_check_min: 60     # how often; a scan with no new mail makes no AI request
-  keep_awake: plugged_in # keep the PC from sleeping while Remote runs: plugged_in (never drains the battery),
-                         # always, or off. Closing the lid / the power button still put it to sleep.
+  mail_reminders: true   # new Gmail with dates -> suggest reminders (tap ✅/❌ in Telegram), in the updates.mail_min scan
+  keep_awake: plugged_in # keep the PC from sleeping while Remote runs: always (on battery too,
+                         # down to 10%), plugged_in (never drains the battery), or off. The lid / power button still sleep.
+
+updates:                 # what Karen Remote tells him unasked: the text, then her voice note, then one ring (calls:)
+  mail: true             # important new Gmail: a real person, replies, deadlines, college, bills, security alerts
+  mail_min: 15           # how often she looks; a look with no new mail makes no AI request
+  event_lead_min: 15     # a heads-up this long before each calendar event (0 = off)
+  morning: "08:00"       # morning briefing (today's plan, weather, overnight mail); "" = off. Evening: evening.time
+  voice_notes: true      # her own voice (Kokoro) as a Telegram voice note with each update
+
+calls:                   # the ring: CallMeBot (free) calls his Telegram and says only "Karen here. You have 2 important
+                         # updates. Check our chat." Set up: Start on @CallMeBot_txtbot, then /callme to Karen
+  enabled: true          # /calls off in Telegram pauses calls, /calls on resumes
+  ring_for: [mail, event, reminder, briefing]
+  quiet: "23:00-07:00"   # no calls, and updates arrive silently; a reminder that says "call me" / "wake me" still rings
+  gap_min: 3             # at least this long between calls: news meanwhile waits and is counted in the next call
+  max_per_day: 20
+  at_pc_s: 120           # used the PC in the last 2 min and voice Karen is open: she says it aloud instead (0 = always ring)
+  voice: en-IN-Standard-A  # CallMeBot's voice (Google "Standard" voices only)
+
+app:                     # Karen's Android app (android/): its link to the PC runs inside Remote (core/appserver.py)
+  enabled: false            # on after pairing a phone (scripts/phone_pair.py)
+  port: 8788             # home Wi-Fi: <this PC's address>:8788 (Windows asks once to allow it on private networks)
+  ngrok: true            # from anywhere: https://$NGROK_DOMAIN (unless WhatsApp's webhook already uses ngrok)
+
+ig_reels:
+  enabled: false
 
 alexa:
   region: amazon.com      # the Amazon site your Alexa account uses (amazon.com, amazon.co.uk, ...)
@@ -360,20 +541,20 @@ pc_control:
     screenshots: true      # send a small screenshot each step (better at "the first song"); false = element list only
     max_steps: 12
     settle_s: 1.2          # wait after each action before looking again
-  power_mode:   # optional: Open Interpreter writes and runs code; asks before the task and before risky steps
-    python: ""    # the Python 3.12 that has open-interpreter installed (empty = power mode off), see docs/SETUP.md
+  power_mode:   # Open Interpreter writes and runs code (The user's choice); asks before the task and before risky steps
+    python: "%LOCALAPPDATA%/Programs/Python/Python312/python.exe"   # the Python that has open-interpreter
     model: deepseek/deepseek-v4.1-flash   # via OpenRouter, zero-data-retention providers
     max_steps: 8
     timeout_s: 240
 
 daily:
-  city: ""                       # home city for weather and the briefing, e.g. London
-  news_region: "hl=en-US&gl=US&ceid=US:en"   # Google News edition, e.g. India: hl=en-IN&gl=IN&ceid=IN:en
+  city: ""                       # home city for weather and the briefing, e.g. Chennai
+  news_region: "hl=en-IN&gl=IN&ceid=IN:en"   # Google News edition (CHANGE_SETTINGS.bat sets the country)
 
 files:
   read_chars: 12000       # how much of a file's text the AI gets at once
   vision_model: deepseek/deepseek-v4.1-flash
 
 dev:
-  project_roots: ["%USERPROFILE%/Desktop", "%USERPROFILE%/source/repos", "%USERPROFILE%/Documents/GitHub"]
+  project_roots: ["%USERPROFILE%/Desktop", "%USERPROFILE%/Documents", "%USERPROFILE%/source/repos"]   # folders here count as projects
   projects: {}            # extra names -> folders, e.g. {rover: "D:/code/rover"}

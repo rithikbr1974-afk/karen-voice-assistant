@@ -5,16 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>KAREN</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Rajdhani:wght@400;500;600&family=Inter:wght@400;500;600&family=Sora:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="aurora.css">
+<link rel="stylesheet" href="study.css">
 </head>
-<body class="sleeping">
+<body class="sleeping theme-aurora">
 <canvas id="core"></canvas>
 <canvas id="avatar"></canvas>
 <div id="avatar-status"></div>
 
 <header>
-  <div class="brand"><h1>KAREN</h1><span class="state" id="state-label">STANDBY</span></div>
+  <div class="brand"><h1>Karen</h1><span class="state" id="state-label">STANDBY</span><button id="meeting-pill" hidden title="Taking meeting notes. Click for the live notes."><i></i><span>Meeting notes</span><b id="meeting-time"></b></button></div>
   <div class="hud">
     <span id="demo-badge">DEMO · NOT CONNECTED</span>
     <span><i class="dot" id="dot-mic"></i>MIC</span>
@@ -26,17 +28,17 @@
 
 <div class="column left">
   <section class="panel" id="p-system">
-    <h2>SYSTEM <small id="sys-uptime"></small></h2>
+    <h2>System <small id="sys-uptime"></small></h2>
     <div class="stat"><span class="label">CPU</span><span class="bar"><i id="bar-cpu"></i></span><span class="value" id="v-cpu">--</span></div>
-    <div class="stat"><span class="label">MEMORY</span><span class="bar"><i id="bar-ram"></i></span><span class="value" id="v-ram">--</span></div>
-    <div class="stat"><span class="label">BATTERY</span><span class="bar"><i id="bar-bat"></i></span><span class="value" id="v-bat">--</span></div>
-    <div class="stat"><span class="label">DISK</span><span class="bar"><i id="bar-disk"></i></span><span class="value" id="v-disk">--</span></div>
+    <div class="stat"><span class="label">Memory</span><span class="bar"><i id="bar-ram"></i></span><span class="value" id="v-ram">--</span></div>
+    <div class="stat"><span class="label">Battery</span><span class="bar"><i id="bar-bat"></i></span><span class="value" id="v-bat">--</span></div>
+    <div class="stat"><span class="label">Disk</span><span class="bar"><i id="bar-disk"></i></span><span class="value" id="v-disk">--</span></div>
     <canvas class="spark" id="spark-cpu"></canvas>
     <div class="details" id="sys-details">CPU history, last 60 s</div>
   </section>
 
   <section class="panel" id="p-brain">
-    <h2>BRAIN <small id="brain-model">--</small></h2>
+    <h2>Brain <small id="brain-model">--</small></h2>
     <div class="kv"><span>Backend</span><b id="brain-backend">--</b></div>
     <div class="kv"><span>First word</span><b id="brain-latency">--</b></div>
     <div class="kv"><span>Memory</span><b id="brain-memory">0 turns</b></div>
@@ -45,7 +47,7 @@
   </section>
 
   <section class="panel" id="p-voice">
-    <h2>VOICE PIPELINE <small id="wake-engine">--</small></h2>
+    <h2>Voice pipeline <small id="wake-engine">--</small></h2>
     <div class="kv"><span>Speech to text</span><b id="t-stt">--</b></div>
     <div class="kv"><span>Voice starts</span><b id="t-voice">--</b></div>
     <div class="kv"><span>Speaker</span><b id="voice-name">--</b></div>
@@ -56,12 +58,27 @@
 
 <div class="column right">
   <section class="panel" id="transcript">
-    <h2>CONVERSATION <small id="msg-count"></small></h2>
+    <h2>Conversation <small id="msg-count"></small></h2>
     <div id="messages"></div>
   </section>
 
+  <section class="panel" id="p-cortex">
+    <h2>Cortex <small id="cx-mode">--</small></h2>
+    <div id="cx-senses">
+      <div class="cx-n" data-s="words"><i></i><span>Words</span></div>
+      <div class="cx-n" data-s="prev"><i></i><span>Her last</span></div>
+      <div class="cx-n" data-s="voice"><i></i><span>Voice</span></div>
+      <div class="cx-n" data-s="sound"><i></i><span>Sound</span></div>
+      <div class="cx-n" data-s="context"><i></i><span>Context</span></div>
+      <div class="cx-n" data-s="media"><i></i><span>Media</span></div>
+    </div>
+    <div class="stat"><span class="label">For me</span><span class="bar"><i id="bar-cx"></i></span><span class="value" id="v-cx">--</span></div>
+    <div id="cx-why">Waiting for a spoken request</div>
+    <canvas class="spark" id="spark-cx" title="Each sense lights up by how much the attention network listened to it. Dim = not learned yet (voice, sound and media need the ear's recordings). Pink bars were below the line."></canvas>
+  </section>
+
   <section class="panel" id="p-abilities">
-    <h2>ABILITIES</h2>
+    <h2>Abilities <small id="abil-count"></small></h2>
     <div id="abilities"></div>
   </section>
 </div>
@@ -88,6 +105,9 @@
   <button class="btn" id="btn-avatar" title="Avatar mode: anime Karen">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0M8 5.5c1.5 1.2 6.5 1.2 8 0"/></svg>
   </button>
+  <button class="btn" id="btn-study" title="Study mode: Mam teaches, draws and quizzes you">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5M22 9v6"/></svg>
+  </button>
   <button class="btn" id="btn-spaces" title="Spaces and Dots (pages your helpers write)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h10l6 6v10H4z"/><path d="M14 4v6h6M8 14h8M8 17h5"/></svg>
     <i id="dots-busy"></i>
@@ -101,7 +121,7 @@
   <button class="btn" id="close-settings" title="Close">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
   </button>
-  <h2>SETTINGS</h2>
+  <h2>Settings</h2>
   <div class="field">
     <label>VOICE</label>
     <select id="set-voice">
@@ -128,11 +148,19 @@
     <div class="hint">Lower wakes more easily but may trigger by mistake. Not used by the Whisper fallback.</div>
   </div>
   <div class="field">
+    <label>LOOK</label>
+    <div class="theme-buttons" id="set-theme">
+      <button data-theme="aurora" title="Soft glowing orb, clean and modern"><i></i>Aurora</button>
+      <button data-theme="classic" title="The original purple HUD with rings"><i></i>Classic</button>
+    </div>
+  </div>
+  <div class="field">
     <label>MODE</label>
     <div class="mode-buttons" id="set-mode">
       <button data-mode="work" title="Focused and efficient, no romance">💼<span>WORK</span></button>
       <button data-mode="both" title="Work first, with a little love">💼💕<span>BOTH</span></button>
       <button data-mode="love" title="Warm, affectionate and playful">💕<span>LOVE</span></button>
+      <button data-mode="toxic" title="Obsessed, jealous and dramatic (playful)">😤<span>TOXIC</span></button>
       <button data-mode="" title="Plain Karen, no personality">🙂<span>NORMAL</span></button>
     </div>
     <div class="hint" id="mode-hint">Or say "Karen, work mode" / "both mode" / "love mode".</div>

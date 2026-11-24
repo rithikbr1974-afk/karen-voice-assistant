@@ -1,10 +1,9 @@
 """A longer training session for Karen: 40 x "Karen", 60 sentences, and the room's sound (saved in
-voice_tests/session1/, git-ignored). Resumable: clips already recorded are skipped, so Ctrl+C any time and run it again.
+voice_tests/session2/, git-ignored). Resumable: clips already recorded are skipped, so Ctrl+C any time and run it again.
 
   python scripts/record_session.py            record (close Karen first: she would answer you)
   python scripts/record_session.py --list     show everything you will be asked to say
   python scripts/record_session.py --redo     start this session over
-  python scripts/record_session.py --session 2   a second round later (more data = fewer mistakes)
 
 Then: python scripts/train_wake.py   (trains on voice_tests/ plus every voice_tests/session*/ folder)
 """
@@ -20,9 +19,9 @@ import numpy as np
 
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, ".")
-FOLDER = f"voice_tests/session{sys.argv[sys.argv.index('--session') + 1] if '--session' in sys.argv else 1}"
+FOLDER = "voice_tests/session2"
 
-# 40 x the wake word: how to say each one (the point is to hear every way you really say it)
+# 40 x the wake word: how to say each one (the point is to hear every way he really says it)
 WAKE_TIPS = ([("normal voice, like calling her", 8), ("a bit louder", 4), ("softer, like late at night", 4),
               ("faster", 4), ("slower, drawn out", 4), ("from further away (lean back or stand up)", 4),
               ("across the room, raised voice", 4), ("casual, half-mumbled", 4),
@@ -38,9 +37,9 @@ COMMANDS = [
     "Karen, what's on my calendar tomorrow?", "Karen, reply to that saying I'll check and get back.",
     "Karen, turn off the hall light.", "Karen, set the AC to twenty four degrees.",
     "Karen, open Chrome and play some music.", "Karen, set the volume to thirty percent.",
-    "Karen, take a screenshot and show it to me.", "Karen, send a WhatsApp message to Sam saying I'm on my way.",
+    "Karen, take a screenshot and show it to me.", "Karen, send a WhatsApp message to Rahul saying I'm on my way.",
     "Karen, what is the capital of Australia?", "Karen, research mode on for noise cancelling earbuds.",
-    "Karen, make a research report on the Pixel nine.", "Karen, open the camera and tell me what you see.",
+    "Karen, make a research report on the Pixel nine a.", "Karen, open the camera and tell me what you see.",
     "Karen, coding mode on.", "Karen, full work mode.", "Karen, love mode.", "Karen, dance for me.",
     "Karen, add buy milk and eggs to my to-do list.", "Karen, what's the news today?",
     "Karen, create a document called project notes.", "Karen, minimize all windows.",

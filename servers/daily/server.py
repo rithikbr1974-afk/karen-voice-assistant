@@ -112,7 +112,11 @@ def set_reminder(text: str, when: str, repeat: str = "") -> str:
         due = _due(when)
     except ValueError:
         return "The time must look like 2026-10-03T18:00."
-    if due < datetime.datetime.now() - datetime.timedelta(minutes=1):
+    now = datetime.datetime.now()
+    pm = due + datetime.timedelta(hours=12)
+    if due < now - datetime.timedelta(minutes=1) < pm and due.date() == now.date() and due.hour < 12:
+        due = pm  # "10 o'clock" said at 21:39 came in as 10:00 AM today (2026-10-28): he meant tonight
+    if due < now - datetime.timedelta(minutes=1):
         return "That time has already passed."
     items = load(REMINDERS, [])
     rid = max([r["id"] for r in items] or [0]) + 1
@@ -129,7 +133,8 @@ def set_timer(minutes: float, label: str = "timer") -> str:
     items = load(REMINDERS, [])
     rid = max([r["id"] for r in items] or [0]) + 1
     items.append({"id": rid, "text": f"Your {label} is done", "due": due.isoformat(timespec="seconds"),
-                  "repeat": None, "done": False, "timer": True})
+                  "repeat": None, "done": False, "timer": True,
+                  "set": datetime.datetime.now().isoformat(timespec="seconds")})  # the island's countdown ring
     save(REMINDERS, items)
     return f"Timer set: {label}, {minutes:g} minutes, ends at {due:%I:%M:%S %p}."
 
@@ -160,7 +165,7 @@ def cancel_reminder(which: str) -> str:
 # ---------------------------------------------------------------- long-term memory
 @mcp.tool()
 def remember(fact: str) -> str:
-    """Store a fact about the user for later, e.g. "their locker code is 2468", "their sister's birthday is 3 March"."""
+    """Store a fact about the user for later, e.g. "his locker code is 2468", "his sister's birthday is 3 March"."""
     facts = load(MEMORY, [])
     facts.append({"fact": fact.strip(), "saved": f"{datetime.date.today():%Y-%m-%d}"})
     save(MEMORY, facts)
@@ -169,27 +174,27 @@ def remember(fact: str) -> str:
 
 @mcp.tool()
 def set_mode(mode: str) -> str:
-    """Karen's personality mode: "work" (full work mode: focused, no romance), "love" (affectionate girlfriend) or
-    "both" (light love with work focus). Not the work_mode that opens apps and windows."""
+    """Karen's personality mode: "work" (full work mode: focused, no romance), "love" (affectionate girlfriend),
+    "both" (light love with work focus) or "toxic" (obsessed, jealous, dramatic girlfriend; "love fun" mode). Not the work_mode that opens apps and windows."""
     key = persona.set_mode(mode)
     if not key:
-        return "The modes are work, both and love."
+        return "The modes are work, both, love and toxic."
     return {"work": "Work mode on: focused and efficient, no romance.",
             "both": "Both mode on: work first, with a little love.",
-            "love": "Love mode on."}[key] + " Say it in that new style from now on."
+            "love": "Love mode on.", "toxic": "Toxic mode on."}[key] + " Say it in that new style from now on."
 
 
 @mcp.tool()
 def set_persona(how: str) -> str:
-    """Change how Karen talks to the user from now on, everywhere and every time, in their own words (e.g. "like a
+    """Change how Karen talks to the user from now on, everywhere and every time, in his own words (e.g. "like a
     strict coach"). For work / love / both use set_mode. Replaces the previous one."""
     persona.custom(how)
-    return f"From now on I'll talk {how.strip()}. It applies to every reply until they change it or says to be normal."
+    return f"From now on I'll talk {how.strip()}. It applies to every reply until he changes it or says to be normal."
 
 
 @mcp.tool()
 def clear_persona() -> str:
-    """Go back to Karen's normal way of talking (remove the personality or mode they set)."""
+    """Go back to Karen's normal way of talking (remove the personality or mode he set)."""
     persona.clear()
     return "Back to normal Karen."
 

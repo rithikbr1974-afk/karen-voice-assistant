@@ -2,7 +2,7 @@
 
 Incoming: Meta calls a webhook. A small local HTTP server (127.0.0.1:port) receives it, reached from the internet through
 ngrok's free fixed domain (started here). Every POST must carry Meta's X-Hub-Signature-256 (HMAC with the app secret),
-so nobody else can inject messages. Replies within 24 h of their last message are free ("service" messages).
+so nobody else can inject messages. Replies within 24 h of his last message are free ("service" messages).
 Same interface as core/telegram.py: poll / send / send_file / download / typing.
 """
 import hashlib
@@ -66,7 +66,7 @@ class WhatsApp:
         threading.Thread(target=server.serve_forever, daemon=True).start()
         exe = shutil.which("ngrok")
         if self.domain and exe:
-            self.ngrok = subprocess.Popen([exe, "http", f"--url={self.domain}", str(self.port), "--log=stdout"],
+            self.ngrok = subprocess.Popen([exe, "http", f"--domain={self.domain}", str(self.port), "--log=stdout"],
                                           stdout=open("logs/ngrok.log", "a"), stderr=subprocess.STDOUT,
                                           creationflags=0x08000000)
         elif self.domain:
@@ -80,7 +80,8 @@ class WhatsApp:
                 for m in value.get("messages", []):
                     kind = m.get("type")
                     item = m.get(kind, {}) if isinstance(m.get(kind), dict) else {}
-                    files = [(item["id"], item.get("filename") or f"{kind}-{m['id'][-8:]}")] if "id" in item else []
+                    label = "voice" if item.get("voice") else kind  # a recorded voice note is him talking to Karen
+                    files = [(item["id"], item.get("filename") or f"{label}-{m['id'][-8:]}")] if "id" in item else []
                     text = (item.get("body") if kind == "text" else item.get("caption")) or ""
                     if kind == "button":
                         text = m.get("button", {}).get("text", "")
@@ -105,7 +106,7 @@ class WhatsApp:
             self._post({"to": chat, "type": "text", "text": {"body": text[i:i + 4000] or "(empty)"}})
 
     def typing(self, chat):
-        if chat in self.last_id:  # marks their message read and shows "typing…" (until the reply, max 25 s)
+        if chat in self.last_id:  # marks his message read and shows "typing…" (until the reply, max 25 s)
             try:
                 self._post({"status": "read", "message_id": self.last_id[chat], "typing_indicator": {"type": "text"}})
             except Exception:

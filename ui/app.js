@@ -139,10 +139,11 @@ function step(now) {
 
 function draw() {
   ctx.clearRect(0, 0, W, H);
-  const { h, s, l, glow } = cur;
+  const { s, l, glow } = cur, h = document.body.classList.contains("study") ? 46 : cur.h;  // study mode: gold
   const breath = 0.5 + 0.5 * Math.sin((T / cur.period) * Math.PI * 2);
   const scale = 1 + 0.018 * breath + 0.09 * easeOut(S.puff) + (S.mode === "speaking" ? S.voice * 0.03 : 0);
   const r = R * scale;
+  if (document.body.classList.contains("theme-aurora")) { drawAurora(R, breath); return; }
 
   // ambient glow behind the orb
   let g = ctx.createRadialGradient(cx, cy, r * 0.4, cx, cy, r * 2.8);
@@ -174,6 +175,58 @@ function draw() {
 }
 
 function easeOut(x) { return 1 - Math.pow(1 - x, 3); }
+
+/* Aurora look: a soft, living orb of coloured light (no rings). Colours follow the state (violet resting, cyan
+   listening, magenta thinking, pink-violet speaking, amber confirm, red error); it swells with your voice or hers. */
+const AURORA = { sleeping: [258, 286, 222], listening: [192, 228, 268], thinking: [290, 324, 252],
+                 speaking: [268, 326, 205], confirm: [40, 22, 300], error: [356, 12, 330] };
+const aur = { hues: [258, 286, 222], energy: 0.15 };
+/* study mode: black and yellow, so the orb glows gold/amber whatever the state (amber-red on error) */
+const STUDY_AURORA = { sleeping: [48, 40, 54], listening: [54, 46, 60], thinking: [38, 30, 48],
+                       speaking: [46, 36, 56], confirm: [30, 44, 22], error: [356, 12, 30] };
+function drawAurora(r, breath) {
+  const target = (document.body.classList.contains("study") ? STUDY_AURORA : AURORA)[S.mode] || AURORA.sleeping;
+  aur.hues = aur.hues.map((h, i) => lerpHue(h, target[i], 0.05));
+  const level = S.mode === "listening" ? S.mic * 1.6 : S.mode === "speaking" ? S.voice * 1.4 : S.mode === "thinking" ? 0.45 : 0.08;
+  aur.energy = lerp(aur.energy, clamp(level, 0, 1), 0.12);
+  const speed = { thinking: 1.9, listening: 1.15, speaking: 1.35, confirm: 0.9, error: 0.7 }[S.mode] || 0.45;
+  const size = r * (1.0 + 0.05 * breath + 0.28 * aur.energy + 0.12 * easeOut(S.puff));
+  // ambient light around it
+  const amb = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 3.2);
+  amb.addColorStop(0, hsl(aur.hues[0], 90, 60, 0.14 + aur.energy * 0.14));
+  amb.addColorStop(1, hsl(aur.hues[1], 90, 50, 0));
+  ctx.fillStyle = amb; ctx.fillRect(0, 0, W, H);
+  // drifting colour blobs, added together
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 6; i++) {
+    const hue = aur.hues[i % 3], t = T * speed * (0.45 + i * 0.16) + i * 1.7;
+    const spread = r * (0.16 + 0.14 * aur.energy);
+    const ox = Math.cos(t) * spread * (1 + (i % 2) * 0.6), oy = Math.sin(t * 1.31) * spread;
+    const rad = size * (0.58 + 0.1 * Math.sin(t * 0.7 + i));
+    const g = ctx.createRadialGradient(cx + ox, cy + oy, 0, cx + ox, cy + oy, rad);
+    g.addColorStop(0, hsl(hue, 95, 63, 0.5));
+    g.addColorStop(0.55, hsl(hue, 95, 55, 0.2));
+    g.addColorStop(1, hsl(hue, 95, 50, 0));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx + ox, cy + oy, rad, 0, Math.PI * 2); ctx.fill();
+  }
+  // a bright heart that glows harder when someone is talking
+  const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.42);
+  core.addColorStop(0, `rgba(255,255,255,${0.28 + 0.45 * aur.energy})`);
+  core.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = core; ctx.beginPath(); ctx.arc(cx, cy, size * 0.42, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+}
+
+/* Settings > Look: aurora (default) or classic; saved by Karen as settings.theme */
+function applyTheme(name) {
+  const theme = name === "classic" ? "classic" : "aurora";
+  document.body.classList.toggle("theme-aurora", theme === "aurora");
+  document.querySelectorAll("#set-theme button").forEach((b) => b.classList.toggle("on", b.dataset.theme === theme));
+}
+document.querySelectorAll("#set-theme button").forEach((b) => {
+  b.onclick = () => { applyTheme(b.dataset.theme); api("set_setting", "theme", b.dataset.theme); };
+});
+applyTheme("aurora");
 
 function drawOrb(r, h, s, l, glow, breath) {
   // outer halo
@@ -368,7 +421,7 @@ function spark(canvas, data, { max = 100, bars = false, colors = null } = {}) {
     const bw = w / 20;
     data.forEach((v, i) => {
       const bh = Math.max(2, (v / m) * (h - 4));
-      c.fillStyle = colors && colors[i] ? colors[i] : "rgba(157,78,255,.7)";
+      c.fillStyle = colors && colors[i] ? colors[i] : `rgba(${ink()},.7)`;
       c.fillRect(i * bw + 1, h - bh, bw - 3, bh);
     });
     return;
@@ -376,11 +429,14 @@ function spark(canvas, data, { max = 100, bars = false, colors = null } = {}) {
   const step = w / Math.max(1, data.length - 1);
   c.beginPath();
   data.forEach((v, i) => { const y = h - 2 - (v / m) * (h - 6); i ? c.lineTo(i * step, y) : c.moveTo(0, y); });
-  c.strokeStyle = "rgba(157,78,255,.9)"; c.lineWidth = 1.5; c.shadowColor = "#9d4eff"; c.shadowBlur = 6; c.stroke(); c.shadowBlur = 0;
+  c.strokeStyle = `rgba(${ink()},.9)`; c.lineWidth = 1.5; c.shadowColor = `rgb(${ink()})`; c.shadowBlur = 6; c.stroke(); c.shadowBlur = 0;
   c.lineTo(w, h); c.lineTo(0, h); c.closePath();
-  const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, "rgba(157,78,255,.25)"); g.addColorStop(1, "rgba(157,78,255,0)");
+  const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, `rgba(${ink()},.25)`); g.addColorStop(1, `rgba(${ink()},0)`);
   c.fillStyle = g; c.fill();
 }
+
+/* the graphs' colour: purple, gold in study mode */
+function ink() { return document.body.classList.contains("study") ? "250,204,21" : "157,78,255"; }
 
 function drawWave() {
   const canvas = $("wave"), dpr = Math.min(devicePixelRatio || 1, 2), w = canvas.clientWidth, h = canvas.clientHeight;
@@ -390,7 +446,7 @@ function drawWave() {
   const d = S.micHist, n = d.length, bw = w / 64;
   for (let i = 0; i < n; i++) {
     const v = d[i], bh = Math.max(1, v * (h - 4));
-    c.fillStyle = `rgba(157,78,255,${0.25 + v * 0.75})`;
+    c.fillStyle = `rgba(${ink()},${0.25 + v * 0.75})`;
     c.fillRect(w - (n - i) * bw, (h - bh) / 2, bw - 1, bh);
   }
 }
@@ -415,7 +471,7 @@ function addMessage(role, text, meta) {
   box.appendChild(el);
   while (box.children.length > 60) box.firstChild.remove();
   box.scrollTop = box.scrollHeight;
-  $("msg-count").textContent = box.querySelectorAll(".msg.you").length + " ASKED";
+  $("msg-count").textContent = box.querySelectorAll(".msg.you").length + " asked";
   return el;
 }
 
@@ -480,7 +536,46 @@ window.karen = {
     }
   },
   message(role, text, meta) { addMessage(role, text, meta); if (role === "error") $("dot-brain").className = "dot bad"; },
+  study(on) {  // study mode (core/study.py): black and yellow, and she is "Mam"
+    document.body.classList.toggle("study", !!on);
+    document.querySelector(".brand h1").textContent = on ? "Mam" : "Karen";
+    document.title = on ? "MAM" : "KAREN";
+    S.study = !!on;
+    $("btn-study").classList.toggle("on", S.study);
+    $("btn-study").title = on ? "Leave study mode (Karen comes back)" : "Study mode: Mam teaches, draws and quizzes you";
+  },
+  meeting(m) {  // meeting notes running (servers/meeting): a red pill with the time, click = live notes
+    clearInterval(S.meetingTimer);
+    $("meeting-pill").hidden = !m.on;
+    if (!m.on) return;
+    $("meeting-pill").title = "Taking meeting notes: " + (m.source || "recording") + ". Click for the live notes.";
+    const tick = () => { const s = Math.max(0, Date.now() / 1000 - (m.since || Date.now() / 1000)) | 0;
+      $("meeting-time").textContent = `${(s / 60) | 0}:${String(s % 60).padStart(2, "0")}`; };
+    tick(); S.meetingTimer = setInterval(tick, 1000);
+  },
   memory(turns) { $("brain-memory").textContent = turns + (turns === 1 ? " turn" : " turns"); },
+  cortex(c) {  // the Cortex's attention verdict on the last spoken request (core/cortex/attention.py)
+    $("cx-mode").textContent = c.mode === "on" ? "ON" : "SHADOW";
+    const heard = c.heard || {};
+    document.querySelectorAll(".cx-n").forEach((n) => {
+      const w = heard[n.dataset.s];
+      n.classList.toggle("off", w == null);
+      n.classList.toggle("lit", w != null);
+      const i = n.querySelector("i");
+      i.style.opacity = w == null ? "" : String(0.35 + 0.65 * Math.min(1, w * 2.5));
+      i.style.boxShadow = w == null ? "" : `0 0 ${Math.round(4 + 18 * w)}px var(--primary)`;
+    });
+    const pct = Math.round(c.p * 100), low = c.verdict === "ignore";
+    setBar("bar-cx", "v-cx", pct, pct + "%", low ? "bad" : "");
+    const how = { wake: `wake word ${Number(c.wake_score).toFixed(2)}`, followup: "follow-up, no wake word", button: "talk button" }[c.how] || c.how;
+    const why = $("cx-why"); why.textContent = "";
+    const b = document.createElement("b");
+    b.textContent = low ? (c.acted ? "Ignored. " : "Would ignore. ") : "For me. ";
+    why.append(b, `${how}, line ${Math.round(c.threshold * 100)}%` + (low && !c.acted ? " (shadow: answered anyway)" : ""));
+    $("p-cortex").classList.toggle("ignored", low);
+    S.cxHist = (S.cxHist || []).concat({ p: c.p, low }).slice(-20);
+    spark($("spark-cx"), S.cxHist.map((x) => x.p * 100), { max: 100, bars: true, colors: S.cxHist.map((x) => (x.low ? "rgba(244,114,182,.85)" : null)) });
+  },
   config(c) {
     if (c.voice) { $("set-voice").value = c.voice; $("voice-name").textContent = $("set-voice").selectedOptions[0]?.text.split(" ")[0] || c.voice; }
     if (c.speed) { $("set-speed").value = c.speed; $("lbl-speed").textContent = Number(c.speed).toFixed(2); }
@@ -495,6 +590,7 @@ window.karen = {
     $("set-wake").disabled = !c.wake_engine || c.wake_engine === "whisper";
     if (c.sounds != null) { Sound.on = !!c.sounds; $("set-sounds").checked = Sound.on; if (!Sound.on) Sound.humStop(); }
     if (c.mode !== undefined) showMode(c.mode || "");
+    if (c.theme) applyTheme(c.theme);
     if (c.face_ready !== undefined) {
       $("set-face").checked = !!c.face_lock; $("set-face").disabled = !c.face_ready;
       $("face-hint").textContent = c.face_ready
@@ -503,14 +599,19 @@ window.karen = {
     }
   },
   abilities(list) {
+    // compact chips: short name, full name + note on hover; problems (failed, needs keys) stand out
     const box = $("abilities"); box.innerHTML = "";
     list.forEach((a) => {
       const el = document.createElement("div");
-      el.className = "ability " + (a.status || "");
-      el.innerHTML = '<i class="led"></i><span></span><small></small>';
-      el.querySelector("span").textContent = a.name; el.querySelector("small").textContent = a.note || "";
+      const bad = /fail|needs/.test(a.note || "");
+      el.className = "ability " + (a.status || "") + (bad ? " bad" : "");
+      el.title = a.name + (a.note ? " - " + a.note : "");
+      el.innerHTML = '<i class="led"></i><span></span>';
+      el.querySelector("span").textContent = a.short || a.name.replace(/\s*\(.*\)$/, "");
       box.appendChild(el);
     });
+    const on = list.filter((a) => a.status === "on").length;
+    $("abil-count").textContent = on + " of " + list.length + " on";
   },
   muted(m) {
     S.muted = !!m; $("btn-sleep").classList.toggle("active", S.muted);
@@ -553,6 +654,8 @@ function sendText() {
 }
 $("btn-settings").onclick = () => $("settings").classList.toggle("open");
 $("btn-add").onclick = () => api("add_files");
+$("meeting-pill").onclick = () => api("send_text", "show meeting notes");
+$("btn-study").onclick = () => { if (window.pywebview) api("study_mode", !S.study); else window.karen.study(!S.study); };
 
 /* drag and drop files onto the window: sent to Python as base64 */
 let dragDepth = 0;
@@ -580,7 +683,7 @@ function showMode(mode) {
   window.karenMode = mode;
   document.querySelectorAll("#set-mode button").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
   $("mode-hint").textContent = mode === "custom" ? "Custom personality (set by voice). Pick a mode to replace it."
-    : 'Or say "Karen, work mode" / "both mode" / "love mode".';
+    : 'Or say "Karen, work mode" / "both mode" / "love mode" / "toxic mode".';
 }
 document.querySelectorAll("#set-mode button").forEach((b) => {
   b.onclick = () => { showMode(b.dataset.mode); api("set_setting", "mode", b.dataset.mode); };
@@ -628,10 +731,10 @@ function makeDemo() {
   k.config({ voice: "af_heart", speed: 1, wake_engine: "whisper", wake_threshold: 0.5,
              backends: [{ name: "gemini", model: "gemini-3.5-flash-lite" }, { name: "openrouter", model: "deepseek-v4.1-flash" }] });
   k.abilities([
-    { name: "Conversation", status: "on", note: "ready" },
-    { name: "Gmail & Calendar", status: "planned", note: "phase 2" },
-    { name: "PC control", status: "planned", note: "phase 3" },
-    { name: "Smart home", status: "planned", note: "phase 4" },
+    { name: "Conversation", short: "Chat", status: "on", note: "ready" },
+    { name: "Gmail & Calendar", short: "Google", status: "planned", note: "phase 2" },
+    { name: "PC control", short: "PC", status: "planned", note: "phase 3" },
+    { name: "Smart home", short: "Alexa", status: "planned", note: "phase 4" },
   ]);
   k.muted(false); k.memory(0);
   k.message("system", "Demo preview: animations and layout only. Nothing here is real data.");
@@ -653,6 +756,9 @@ function makeDemo() {
     micTimer = setInterval(() => k.level(Math.random() * 0.8 + 0.1, 0), 70);
     later(2200, () => {
       clearInterval(micTimer); k.level(0, 0); k.message("you", q, "speech-to-text 2.4s");
+      const low = cycle % 3 === 0, p = low ? 0.08 + Math.random() * 0.1 : 0.7 + Math.random() * 0.28;
+      k.cortex({ mode: "shadow", p, threshold: 0.3, verdict: low ? "ignore" : "answer", how: low ? "followup" : "wake",
+                 wake_score: 0.97, heard: { words: 0.34, prev: low ? 0.3 : 0.12, context: 0.4 }, acted: false });
       k.state("thinking", "GEMINI");
       if (!a) {
         later(1200, () => {

@@ -22,7 +22,9 @@ from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from openrouter import BUSY, NoVision, chat  # noqa: E402
+from core import adbguard  # noqa: E402  (no new adb server while Android Studio / phone mode has adb stopped)
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CFG = (yaml.safe_load(open(os.path.join(ROOT, "config.yaml"), encoding="utf-8")) or {}).get("phone", {})
@@ -58,24 +60,77 @@ def adb(*args, timeout=20, binary=False):
     exe = _adb_exe()
     if not exe:
         raise RuntimeError("adb isn't installed (winget install Google.PlatformTools).")
-    device = CFG.get("device") or os.environ.get("PHONE_ADB", "")
+    if adbguard.tools_blocked():
+        raise RuntimeError(adbguard.MESSAGE)
+    device = _dev or _serial("main")
     cmd = [exe] + (["-s", device] if device else []) + list(args)
     r = subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=0x08000000)
     return r.stdout if binary else (r.stdout + r.stderr).decode("utf-8", "replace").strip()
 
 
+_dev = ""  # the phone the current tool call talks to ("" = the main phone)
+
+
+def _attached():
+    """Serials of the phones adb sees as ready."""
+    exe = _adb_exe()
+    if not exe or adbguard.tools_blocked():
+        return []
+    out = subprocess.run([exe, "devices"], capture_output=True, text=True, creationflags=0x08000000).stdout
+    return re.findall(r"^(\S+)\tdevice$", out, re.M)
+
+
+def _seconds():
+    """phone.second: one adb serial or a list (its USB serial and its Wi-Fi ip:5555)."""
+    s = CFG.get("second") or []
+    return [str(x) for x in (s if isinstance(s, list) else [s])]
+
+
+def _serial(which="main"):
+    """adb serial of the second phone (the attached one of phone.second; reconnects ip:port over Wi-Fi), or the
+    main one (phone.device, else whichever connected phone isn't the second)."""
+    seconds = _seconds()
+    if which == "second":
+        ready = _attached()
+        hit = next((s for s in seconds if s in ready), "")
+        for s in [] if hit else [s for s in seconds if re.fullmatch(r"[\d.]+:\d+", s)]:
+            adb_exe = _adb_exe()
+            subprocess.run([adb_exe, "connect", s], capture_output=True, timeout=10, creationflags=0x08000000)
+            if s in _attached():
+                return s
+        return hit or (seconds[0] if seconds else "")
+    main = CFG.get("device") or os.environ.get("PHONE_ADB", "")
+    if main:
+        return main
+    others = [d for d in _attached() if d not in seconds]
+    return others[0] if others else ""
+
+
+def use(which=""):
+    """Point the following adb calls at the main or the second phone (the spare SIM). Returns an error or ""."""
+    global _dev
+    second = str(which).lower() in ("second", "2", "other", "old", "spare", "karen")
+    _dev = _serial("second") if second else ""
+    if second and not _dev:
+        return "The second phone isn't set up (phone.second in config.yaml)."
+    return ""
+
+
 def _connected():
-    """True if a phone is connected; tries to reconnect over Wi-Fi (mDNS finds the wireless-debugging port)."""
-    if re.search(r"\tdevice$", adb("devices"), re.M):
+    """True if the chosen phone is connected; the main one also tries to reconnect over Wi-Fi (mDNS)."""
+    if _dev:
+        return _dev in _attached()
+    if _serial("main") in _attached():
         return True
     services = adb("mdns", "services")
     for addr in re.findall(r"_adb-tls-connect\._tcp\.?\s+([\d.]+:\d+)", services):
         adb("connect", addr)
-    return bool(re.search(r"\tdevice$", adb("devices"), re.M))
+    return _serial("main") in _attached()
 
 
 NOT_CONNECTED = ("Your phone isn't connected. On the phone: Settings > Developer options > Wireless debugging must be "
                  "on and the phone on the same Wi-Fi as the PC (pair once with scripts/phone_pair.py).")
+SECOND_OFF = "The second phone isn't connected. Plug it into the PC by USB with USB debugging on."
 
 
 # ---------------------------------------------------------------- screen reading
@@ -108,10 +163,33 @@ def _elements():
 
 
 @mcp.tool()
+def find_my_phone() -> str:
+    """Make the phone ring loudly so the user can find it ("where is my phone?", "ring my phone"). It rings at
+    alarm volume, even on silent, until it is stopped on the phone."""
+    err = _pick("")
+    if err:
+        return err
+    # a 1-second Clock timer: timers ring at alarm volume and ignore silent mode (standard Android intent)
+    out = adb("shell", "am", "start", "-a", "android.intent.action.SET_TIMER",
+              "--ei", "android.intent.extra.alarm.LENGTH", "1", "--ez", "android.intent.extra.alarm.SKIP_UI", "true",
+              "--es", "android.intent.extra.alarm.MESSAGE", _q("Karen: here I am!"))
+    if "Error" in out or "unable" in out.lower():  # no clock app that takes timers: wake the screen and play a ringtone
+        adb("shell", "input", "keyevent", "224")
+        tones = [t for t in adb("shell", "ls", "/system/media/audio/ringtones").split() if t.endswith((".ogg", ".mp3"))]
+        if not tones:
+            return "I couldn't make the phone ring (no clock timer or ringtone available)."
+        adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-t", "audio/*",
+            "-d", f"file:///system/media/audio/ringtones/{tones[0]}")
+        return "Playing a ringtone on your phone. Follow the sound."
+    return "Your phone will ring in a second, loud even on silent. Stop the timer on the phone when you find it."
+
+
+@mcp.tool()
 def phone_status() -> str:
     """Whether the phone is connected, its battery, and which app is open."""
-    if not _connected():
-        return NOT_CONNECTED
+    err = _pick("")
+    if err:
+        return err
     model = adb("shell", "getprop", "ro.product.model")
     battery = re.search(r"level: (\d+)", adb("shell", "dumpsys", "battery"))
     focus = re.search(r"mCurrentFocus=.*?\s(\S+)/", adb("shell", "dumpsys", "window"))
@@ -122,8 +200,9 @@ def phone_status() -> str:
 @mcp.tool()
 def phone_open_app(name: str) -> str:
     """Open an app on the user's phone (WhatsApp, YouTube, Gmail, Chrome, Maps, Camera, Settings...)."""
-    if not _connected():
-        return NOT_CONNECTED
+    err = _pick("")
+    if err:
+        return err
     key = name.lower().strip()
     pkg = APPS.get(key)
     if not pkg:
@@ -144,8 +223,9 @@ def phone_open_app(name: str) -> str:
 @mcp.tool()
 def phone_read_screen() -> str:
     """The text on the phone screen now (e.g. an open WhatsApp chat or a notification shade)."""
-    if not _connected():
-        return NOT_CONNECTED
+    err = _pick("")
+    if err:
+        return err
     items, pkg = _elements()
     texts = [label.split(": ", 1)[1] for _, label, _, _, _ in items]
     return f"App: {pkg}\n" + "\n".join(dict.fromkeys(texts))[:4000] if texts else "The phone screen has no readable text."
@@ -154,8 +234,9 @@ def phone_read_screen() -> str:
 @mcp.tool()
 def phone_notifications() -> str:
     """Recent notifications on the phone (app, title, text): new WhatsApp messages, OTP-free summaries, alerts."""
-    if not _connected():
-        return NOT_CONNECTED
+    err = _pick("")
+    if err:
+        return err
     dump = adb("shell", "dumpsys", "notification", "--noredact", timeout=30)
     out = []
     for block in re.split(r"\n\s*NotificationRecord\(", dump)[1:]:
@@ -173,8 +254,9 @@ def phone_notifications() -> str:
 @mcp.tool()
 def phone_screenshot() -> str:
     """Take a screenshot of the phone and show/send it to the user."""
-    if not _connected():
-        return NOT_CONNECTED
+    err = _pick("")
+    if err:
+        return err
     png = adb("exec-out", "screencap", "-p", binary=True, timeout=30)
     folder = os.path.join(ROOT, "data", "phone")
     os.makedirs(folder, exist_ok=True)
@@ -265,10 +347,12 @@ async def _agent(goal, ctx, preapproved=False):
 
 @mcp.tool()
 async def phone_operate(goal: str, ctx: Context) -> str:
-    """Do a task on the user's phone by tapping and typing like a person (any app). goal: what to achieve, in full.
-    Taps on send/pay/delete/post ask them first."""
-    if not _connected():
-        return NOT_CONNECTED
+    """Older text-only phone agent; prefer artemis__phone_do when it is offered. Do a task on the user's phone by
+    tapping and typing like a person (any app). goal: what to achieve, in full.
+    Taps on send/pay/delete/post ask him first."""
+    err = _pick("")
+    if err:
+        return err
     return await _guard(_agent(goal, ctx))
 
 
@@ -287,9 +371,10 @@ async def _guard(job):
 @mcp.tool()
 async def phone_send_whatsapp(contact: str, ctx: Context, message: str = "", file: str = "") -> str:
     """Send a WhatsApp message and/or a file from the user's own phone to a contact. file: a path on the PC (e.g. a
-    report in Documents/Karen); it is copied to the phone's Download/Karen first. Karen asks them before sending."""
-    if not _connected():
-        return NOT_CONNECTED
+    report in Documents/Karen); it is copied to the phone's Download/Karen first. Karen asks him before sending."""
+    err = _pick("")
+    if err:
+        return err
     goal = f"In WhatsApp, open the chat with {contact}"
     if file:
         if not os.path.isfile(file):
@@ -305,13 +390,99 @@ async def phone_send_whatsapp(contact: str, ctx: Context, message: str = "", fil
     goal += ", then tap send. Done when it shows as sent."
     phone_open_app("whatsapp")
     time.sleep(2)
-    result = await _guard(_agent(goal, ctx, preapproved=True))  # Karen already read it back and they said yes
+    result = await _guard(_agent(goal, ctx, preapproved=True))  # Karen already read it back and he said yes
     log("whatsapp", f"{contact}: {message[:60]} {os.path.basename(file) if file else ''} -> {result[:80]}")
     return result
 
 
+COMPOSER = (0.915, 0.894)  # the photo/file preview's round send button, as a share of the screen (480x960 phone)
+
+
+def _focus():
+    m = re.search(r"mCurrentFocus=\S+ \S+ (\S+?)\}", adb("shell", "dumpsys", "window", "windows"))
+    return m.group(1) if m else ""
+
+
+def _tap_send(timeout=25):
+    """Tap WhatsApp's send button once its screen is up. Found by reading the screen, and remembered per phone and
+    screen. The photo preview's "Restyle with AI" animation can keep the screen reader from ever settling, so
+    there a known spot is used."""
+    spots = json.load(open(SPOT)) if os.path.exists(SPOT) else {}
+    end = time.time() + timeout
+    while time.time() < end:
+        screen = _focus()
+        if "com.whatsapp/" not in screen:
+            time.sleep(0.7)
+            continue
+        key = f"wa_send:{_dev or 'main'}:{screen.rsplit('.', 1)[-1]}"
+        items, _pkg = _elements()
+        hit = next((i for i in items if i[4] and re.search(r":\s*send$", i[1], re.I)), None)  # "button: Send"
+        if hit:
+            spots[key] = [hit[2], hit[3]]
+            json.dump(spots, open(SPOT, "w"))
+            adb("shell", "input", "tap", str(hit[2]), str(hit[3]))
+            return True
+        if "MediaComposer" in screen and time.time() > end - timeout + 6:  # the reader can't settle on this screen
+            if key not in spots:
+                w, h = map(int, re.findall(r"(\d+)x(\d+)", adb("shell", "wm", "size"))[-1])
+                spots[key] = [int(w * COMPOSER[0]), int(h * COMPOSER[1])]
+            adb("shell", "input", "tap", *map(str, spots[key]))
+            time.sleep(1.5)
+            return "MediaComposer" not in _focus()  # the preview closes once it's sent
+        time.sleep(1)
+    return False
+
+
+@mcp.tool()
+def whatsapp_me(message: str = "", file: str = "") -> str:
+    """Send the user himself a WhatsApp from Karen's own number (the second phone): a message and/or a file on the PC
+    (a screenshot, photo, PDF, report...). For 'WhatsApp me', 'send me ... on WhatsApp', 'message me'."""
+    owner = re.sub(r"\D", "", os.environ.get("OWNER_PHONE", ""))
+    if not owner:
+        return "OWNER_PHONE isn't set in .env."
+    if not message and not file:
+        return "Nothing to send."
+    err = _pick("second")
+    if err:
+        return err
+    adb("shell", "input", "keyevent", "224")  # wake the screen
+    sent = []
+    if file:
+        if not os.path.isfile(file):
+            return f"I couldn't find the file {file} on the PC."
+        name = re.sub(r"[^\w.-]", "_", os.path.basename(file))
+        adb("shell", "mkdir", "-p", UPLOAD_DIR)
+        adb("push", file, f"{UPLOAD_DIR}/{name}", timeout=120)
+        ext = name.rsplit(".", 1)[-1].lower()
+        mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp",
+                "mp4": "video/mp4", "pdf": "application/pdf"}.get(ext, "*/*")
+        args = ["shell", "am", "start", "-a", "android.intent.action.SEND", "-t", mime, "-p", "com.whatsapp",
+                "--eu", "android.intent.extra.STREAM", _q(f"file://{UPLOAD_DIR}/{name}"),
+                "--es", "jid", _q(f"{owner}@s.whatsapp.net")]
+        if message:
+            args += ["--es", "android.intent.extra.TEXT", _q(message)]
+        adb(*args)
+        if not _tap_send():
+            return "WhatsApp opened with the file, but I couldn't find its send button. Tap send on the second phone."
+        sent.append(name)
+        time.sleep(4)  # WhatsApp keeps its own copy once sent; don't leave screenshots lying on the phone
+        adb("shell", "rm", "-f", _q(f"{UPLOAD_DIR}/{name}"))
+        message = "" if mime.startswith(("image/", "video/")) else message  # the caption went with the picture
+    if message:
+        # a share straight into his chat (jid); the wa.me link got stuck on "Searching…" for his number
+        adb("shell", "am", "start", "-a", "android.intent.action.SEND", "-t", "text/plain", "-p", "com.whatsapp",
+            "--es", "android.intent.extra.TEXT", _q(message), "--es", "jid", _q(f"{owner}@s.whatsapp.net"))
+        if not _tap_send():
+            return "WhatsApp opened with the message typed, but I couldn't find its send button."
+        sent.append("the message")
+    time.sleep(1.5)
+    adb("shell", "input", "keyevent", "3")  # home: don't leave WhatsApp open on the chat
+    log("wa_me", f"{', '.join(sent)}: {message[:60]}")
+    return f"Sent you {' and '.join(sent)} on WhatsApp from my number."
+
+
 # ---------------------------------------------------------------- calls and SMS (JARVIS batch 4)
-# adb's shell user can read contacts, SMS and the call log on their phone (Android 13), so no app or root is needed.
+# adb's shell user can read contacts, SMS and the call log on his phone (Android 13), so no app or root is needed.
 # Calls and SMS sends are confirmed by Karen first (config confirm: phone__phone_call, *send*).
 OTP = re.compile(r"\b(otp|one.time|verification|code is|passcode|password|cvv|\d{4,8} is your)\b", re.I)
 
@@ -329,6 +500,9 @@ def _rows(uri, projection, where="", sort=""):
     if sort:
         args += ["--sort", _q(sort)]
     out = adb(*args, timeout=30)
+    if "Permission Denial" in out:  # Android 7 and older: adb's shell may not read the call log or SMS
+        raise PermissionError(f"This phone's Android doesn't let Karen read {uri.split('/')[2].replace('_', ' ')} "
+                              f"over adb.")
     rows = []
     for chunk in re.split(r"(?:^|\n)Row: \d+ ", out)[1:]:
         row, rest = {}, chunk
@@ -351,18 +525,38 @@ _book = (0, {})
 
 
 def _contacts():
-    """{name: [numbers]} from the phone's address book (cached 5 minutes; reading it takes ~1.5 s)."""
-    global _book
+    """{name: [numbers]} from the main phone's address book (the second phone's if the main one is away; cached
+    5 minutes; reading it takes ~1.5 s)."""
+    global _book, _dev
     if time.time() - _book[0] < 300:
         return _book[1]
-    book = {}
-    for r in _rows("content://com.android.contacts/data/phones", ["display_name", "data1"]):
+    book, chosen = {}, _dev
+    if _dev and _serial("main") in _attached():
+        _dev = _serial("main")  # his contacts live on the main phone
+    try:
+        rows = _rows("content://com.android.contacts/data/phones", ["display_name", "data1"])
+    finally:
+        _dev = chosen
+    for r in rows:
         if r["display_name"] and r["data1"]:
             nums = book.setdefault(r["display_name"], [])
             if _digits(r["data1"]) not in map(_digits, nums):
                 nums.append(r["data1"].replace(" ", ""))
     _book = (time.time(), book)
     return book
+
+
+def _pick(which):
+    """Choose the phone for this tool call: "" if it's ready, else what to tell him."""
+    err = use(which)
+    if err:
+        return err
+    if not _connected():
+        return SECOND_OFF if _dev else NOT_CONNECTED
+    return ""
+
+
+WHICH = "Which phone: leave empty for his main phone; 'second' for the spare-SIM phone (only when he says so)."
 
 
 def _lookup(who):
@@ -394,8 +588,9 @@ def _when(ms):
 @mcp.tool()
 def phone_find_contact(name: str) -> str:
     """Look up a contact's phone number(s) in the user's phone."""
-    if not _connected():
-        return NOT_CONNECTED
+    err = _pick("")
+    if err:
+        return err
     book = _contacts()
     key = name.lower().strip()
     hits = [n for n in book if key in n.lower()] or difflib.get_close_matches(name, list(book), n=5, cutoff=0.6)
@@ -403,11 +598,12 @@ def phone_find_contact(name: str) -> str:
 
 
 @mcp.tool()
-def phone_call(contact: str, sim: int = 0) -> str:
-    """Call a contact (name) or a number from the user's phone. Karen asks them first. Don't ask which SIM: leave
-    sim 0 (the phone's default) unless they name SIM 1 or 2."""
-    if not _connected():
-        return NOT_CONNECTED
+def phone_call(contact: str, sim: int = 0, which: str = "") -> str:
+    """Call a contact (name) or a number from the user's phone. Karen asks him first. Don't ask which SIM: leave
+    sim 0 (the phone's default) unless he names SIM 1 or 2. which="second" calls from the spare-SIM phone."""
+    err = _pick(which)
+    if err:
+        return err
     name, number = _lookup(contact)
     if not name:
         return number
@@ -418,35 +614,84 @@ def phone_call(contact: str, sim: int = 0) -> str:
     if len(sims) >= 2:
         pick = sims[min(max(sim, 1), len(sims)) - 1]
         adb("shell", "input", "tap", str(pick[2]), str(pick[3]))
-    log("call", f"{name} {number}")
-    return f"Calling {name}{'' if name == number else f' ({number})'} on your phone. Say hang up to end it."
+    log("call", f"{name} {number}{' [second]' if _dev else ''}")
+    return f"Calling {name}{'' if name == number else f' ({number})'} on your {'second ' if _dev else ''}phone. Say hang up to end it."
+
+
+def call_state():
+    """"dialing" | "active" | "ended" for the chosen phone's call (telecom's own call list)."""
+    dump = adb("shell", "dumpsys", "telecom")
+    states = re.findall(r"^\s*state:\s*(\w+)", dump, re.M)
+    if states:  # newer Android: each live call lists its state
+        live = [s for s in states if s not in ("DISCONNECTED", "ABORTED")]
+        return "active" if "ACTIVE" in live else "dialing" if live else "ended"
+    # Android 7: only an event log per call; the newest call's last state event tells
+    last = dump[dump.rfind("Call TC@"):] if "Call TC@" in dump else ""
+    events = re.findall(r"\b(SET_DIALING|SET_RINGING|SET_ACTIVE|SET_ON_HOLD|SET_DISCONNECTED)\b", last)
+    final = events[-1] if events else "SET_DISCONNECTED"
+    return {"SET_ACTIVE": "active", "SET_ON_HOLD": "active", "SET_DISCONNECTED": "ended"}.get(final, "dialing")
+
+
+SPOT = os.path.join(ROOT, "data", "speaker_spot.json")  # where each phone's in-call Speaker button is
+
+
+def speakerphone():
+    """Tap the in-call screen's Speaker button (not on yet). True if it tapped one. Reading the screen takes ~5 s
+    on the old phone, so the button's spot is saved and later calls tap it as soon as the call screen is up."""
+    spots = json.load(open(SPOT)) if os.path.exists(SPOT) else {}
+    key = _dev or "main"
+    if key in spots:
+        for _ in range(20):
+            if re.search(r"mCurrentFocus=\S+ \S+ \S*InCall", adb("shell", "dumpsys", "window", "windows")):
+                adb("shell", "input", "tap", *map(str, spots[key]))
+                return True
+            time.sleep(0.5)
+    for _ in range(4):
+        items, _pkg = _elements()
+        hit = next((i for i in items if re.search(r"\bspeaker\b", i[1], re.I)), None)
+        if hit:
+            adb("shell", "input", "tap", str(hit[2]), str(hit[3]))
+            spots[key] = [hit[2], hit[3]]
+            json.dump(spots, open(SPOT, "w"))
+            return True
+        time.sleep(1)
+    return False
+
+
+def call_volume_max(presses=10):
+    """Turn the in-call volume all the way up (volume keys act on the call while one is going)."""
+    for _ in range(presses):
+        adb("shell", "input", "keyevent", "24")
 
 
 @mcp.tool()
-def phone_end_call() -> str:
+def phone_end_call(which: str = "") -> str:
     """Hang up / end / reject the phone call."""
-    if not _connected():
-        return NOT_CONNECTED
+    err = _pick(which)
+    if err:
+        return err
     adb("shell", "input", "keyevent", "6")  # KEYCODE_ENDCALL
     log("end_call", "")
     return "Call ended."
 
 
 @mcp.tool()
-def phone_answer_call() -> str:
+def phone_answer_call(which: str = "") -> str:
     """Answer (pick up) the phone call that is ringing now."""
-    if not _connected():
-        return NOT_CONNECTED
+    err = _pick(which)
+    if err:
+        return err
     adb("shell", "input", "keyevent", "5")  # KEYCODE_CALL
     log("answer_call", "")
     return "Answered. Talk on your phone."
 
 
 @mcp.tool()
-def phone_call_log(count: int = 8, missed_only: bool = False) -> str:
+def phone_call_log(count: int = 8, missed_only: bool = False, which: str = "") -> str:
     """Recent calls on the phone: who, incoming/outgoing/missed, when, how long."""
-    if not _connected():
-        return NOT_CONNECTED
+    err = _pick(which)
+    if err:
+        return err
     kinds = {"1": "incoming", "2": "outgoing", "3": "missed", "5": "rejected", "6": "blocked"}
     rows = _rows("content://call_log/calls", ["number", "type", "date", "duration"],
                  where="type=3" if missed_only else "", sort=f"date DESC LIMIT {min(max(count, 1), 30)}")
@@ -458,11 +703,12 @@ def phone_call_log(count: int = 8, missed_only: bool = False) -> str:
 
 
 @mcp.tool()
-def phone_read_sms(contact: str = "", count: int = 5, unread_only: bool = False) -> str:
+def phone_read_sms(contact: str = "", count: int = 5, unread_only: bool = False, which: str = "") -> str:
     """Read recent SMS text messages on the phone, optionally only from one contact or only unread.
     Security codes (OTPs) are hidden."""
-    if not _connected():
-        return NOT_CONNECTED
+    err = _pick(which)
+    if err:
+        return err
     where = ["read=0"] if unread_only else []
     if contact:
         name, number = _lookup(contact)
@@ -481,10 +727,12 @@ def phone_read_sms(contact: str = "", count: int = 5, unread_only: bool = False)
 
 
 @mcp.tool()
-def phone_send_sms(contact: str, message: str) -> str:
-    """Send an SMS text message from the user's phone to a contact (name) or number. Karen reads it back first."""
-    if not _connected():
-        return NOT_CONNECTED
+def phone_send_sms(contact: str, message: str, which: str = "") -> str:
+    """Send an SMS text message from the user's phone to a contact (name) or number. Karen reads it back first.
+    which="second" sends from the spare-SIM phone (only when he asks for the other/second number)."""
+    err = _pick(which)
+    if err:
+        return err
     name, number = _lookup(contact)
     if not name:
         return number
@@ -502,11 +750,15 @@ def phone_send_sms(contact: str, message: str) -> str:
         return "The Messages app opened with the text typed in, but I couldn't find its send button. Tap send on the phone."
     adb("shell", "input", "tap", str(send[2]), str(send[3]))
     time.sleep(3)
-    sent = _rows("content://sms/sent", ["address", "date"], where=f"date>{started}", sort="date DESC LIMIT 3")
+    try:
+        sent = _rows("content://sms/sent", ["address", "date"], where=f"date>{started}", sort="date DESC LIMIT 3")
+    except PermissionError:  # can't check on old Android: the tap went through, trust it
+        log("sms", f"[second] {name} {number}: {message[:60]} -> tapped send (can't verify)")
+        return f"I tapped send to {name}. This phone doesn't let me check it went, so glance at it if it matters."
     ok = any(_digits(r["address"]) == _digits(number) for r in sent)
-    log("sms", f"{name} {number}: {message[:60]} -> {'sent' if ok else 'not confirmed'}")
-    return (f"Sent the SMS to {name}." if ok else
-            f"I tapped send, but the phone hasn't shown it as sent yet. Check the Messages app.")
+    log("sms", f"{'[second] ' if _dev else ''}{name} {number}: {message[:60]} -> {'sent' if ok else 'not confirmed'}")
+    return (f"Sent the SMS to {name}{' from the second phone' if _dev else ''}." if ok else
+            "I tapped send, but the phone hasn't shown it as sent yet. Check the Messages app.")
 
 
 if __name__ == "__main__":

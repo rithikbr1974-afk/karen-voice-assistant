@@ -28,7 +28,7 @@ async def main():
     sys.path.insert(0, "servers/alexa")
     from region import RegionLogin  # signs in on amazon.<region>, not always amazon.com
     cfg = (yaml.safe_load(open("config.yaml", encoding="utf-8")) or {}).get("alexa", {})
-    region = cfg.get("region", "amazon.com")
+    region = cfg.get("region", "amazon.in")
     os.makedirs(STORE, exist_ok=True)
     email = input("Your Amazon account email: ").strip()
     if "@" not in email:

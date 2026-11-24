@@ -1,25 +1,19 @@
-# secrets: never commit these
+# secrets
 .env
 client_secret*.json
 credentials*.json
 token*.json
-*.token
-.credentials/
-
-# Python
+# local, made by SETUP.bat or while Karen runs
 .venv/
+.python/
 __pycache__/
-*.pyc
-
-# downloaded models and your own avatars/motions (scripts/download_models.py fetches the free ones)
-models/
-
-# your personal data: logs, voice recordings, settings, reminders, memories, face profile, uploads
+models/*
+!models/karen.vrm
 logs/
-voice_samples/
+data/
 voice_tests/
 settings.json
-data/
-
-# avatar files linked from models/ at start-up
 ui/avatar/
+ui/hands_assets/
+tools/
+.python/

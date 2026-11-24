@@ -6,7 +6,7 @@ work gets the app's normal "save?" prompt). Files are opened, moved and deleted 
 user folders, never programs or scripts. Keys that open Run/Search/Start are blocked and nothing is typed, pressed
 or clicked into terminals. Every action is logged to logs/pc_actions.log.
 
-The one exception is power_mode (optional): Open Interpreter writes and runs code. Karen asks before the
+The one exception is power_mode (The user's choice): Open Interpreter writes and runs code. Karen asks before the
 task starts, power_mode.py asks again (MCP elicitation) before any step that deletes, kills, installs, downloads,
 starts programs or changes system settings, and every code block is logged to logs/power_mode.log.
 """
@@ -358,17 +358,40 @@ def clipboard(text: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------- screen
+def _grab(box=None):
+    """((width, height), RGB bytes) of the screen or of box {left, top, width, height}. mss's BitBlt sometimes fails
+    ("Windows graphics function failed": screen locking, UAC, display switch): retry, then Pillow's ImageGrab."""
+    import mss
+    last = None
+    for _ in range(3):
+        try:
+            with (mss.MSS() if hasattr(mss, "MSS") else mss.mss()) as s:
+                shot = s.grab(box or s.monitors[1])
+            return tuple(shot.size), shot.rgb
+        except Exception as e:
+            last = e
+            time.sleep(0.4)
+    try:
+        from PIL import ImageGrab
+        bbox = (box["left"], box["top"], box["left"] + box["width"], box["top"] + box["height"]) if box else None
+        im = ImageGrab.grab(bbox=bbox, all_screens=True).convert("RGB")
+        return im.size, im.tobytes()
+    except Exception:
+        raise RuntimeError("I can't capture the screen right now (it may be locked or switching displays).") from last
+
+
 @mcp.tool()
+@friendly
 def screenshot(describe: bool = False) -> str:
-    """Save a screenshot to Pictures/Karen. describe=true also says what is on screen (sent to a vision model)."""
+    """Save a screenshot to Pictures/Karen. describe: false for "take a screenshot"; true ONLY when he asks what is
+    on the screen (it sends the picture to a vision model)."""
     import mss
     import mss.tools
     folder = os.path.join(known_folder("Pictures"), "Karen")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, f"screenshot {datetime.datetime.now():%Y-%m-%d %H.%M.%S}.png")
-    with (mss.MSS() if hasattr(mss, "MSS") else mss.mss()) as s:
-        shot = s.grab(s.monitors[1])
-        png = mss.tools.to_png(shot.rgb, shot.size, output=path) or open(path, "rb").read()
+    size, rgb = _grab()
+    png = mss.tools.to_png(rgb, size, output=path) or open(path, "rb").read()
     log("screenshot", path + (" (described)" if describe else ""))
     if not describe:
         return f"Saved a screenshot to Pictures/Karen.\n[[show: {path}]]"
@@ -391,16 +414,14 @@ def explain_error(question: str = "") -> str:
     """Look at the screen and explain the error/problem shown and how to fix it (code, terminal, app, website).
     If it points to a file and line, Karen can open it in VS Code (dev open_in_editor)."""
     import io
-    import mss
     from PIL import Image
-    with (mss.MSS() if hasattr(mss, "MSS") else mss.mss()) as s:
-        shot = s.grab(s.monitors[1])
-    im = Image.frombytes("RGB", shot.size, shot.rgb)
+    size, rgb = _grab()
+    im = Image.frombytes("RGB", size, rgb)
     im.thumbnail((1600, 1600))
     buf = io.BytesIO()
     im.save(buf, "PNG")
     raw = chat(CFG.get("vision", {}).get("model"), max_tokens=350, messages=[{"role": "user", "content": [
-        {"type": "text", "text": EXPLAIN.format(question=f"They asked: {question}" if question else "")},
+        {"type": "text", "text": EXPLAIN.format(question=f"He asked: {question}" if question else "")},
         {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()}}]}])
     try:
         found = json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
@@ -988,11 +1009,10 @@ def _snapshot(hwnd):
                         texts.append(ch.Name[:100])
                 except Exception:
                     continue  # same: skip elements that disappear mid-read
-    with (mss.MSS() if hasattr(mss, "MSS") else mss.mss()) as s:
-        box = {"left": max(0, wr.left), "top": max(0, wr.top), "width": max(1, wr.width()), "height": max(1, wr.height())}
-        shot = s.grab(box)
-    img = np.frombuffer(shot.rgb, np.uint8).reshape(shot.height, shot.width, 3)
-    step = max(1, int(np.ceil(shot.width / 1024)))
+    box = {"left": max(0, wr.left), "top": max(0, wr.top), "width": max(1, wr.width()), "height": max(1, wr.height())}
+    (shot_w, shot_h), rgb = _grab(box)
+    img = np.frombuffer(rgb, np.uint8).reshape(shot_h, shot_w, 3)
+    step = max(1, int(np.ceil(shot_w / 1024)))
     img = np.ascontiguousarray(img[::step, ::step])
     png = mss.tools.to_png(img.tobytes(), (img.shape[1], img.shape[0]))
     return title, items, texts, png
@@ -1036,7 +1056,7 @@ async def operate(goal: str, ctx: Context, window: str = "") -> str:
     """Do something on screen like a person, step by step: look at the window, move the mouse, click buttons,
     links and list items, type into fields, press keys, scroll. Use it for things like "play the first song in my
     YouTube Music library", "click the second search result", "fill in this form", "open my latest email in the
-    browser". Never tell the user to click something themselves; use this instead. Give the whole goal in one sentence.
+    browser". Never tell the user to click something himself; use this instead. Give the whole goal in one sentence.
     window: optional part of the title of the window to work in (otherwise the one in front, or open_url first)."""
     import asyncio
     if window:
@@ -1095,7 +1115,7 @@ async def _agent(goal, ctx, hwnd, preapproved=False):
                 continue  # it was going round in circles (Home -> Library -> Home...)
             try:
                 outcome = await asyncio.to_thread(_do, action, items, hwnd)
-            except Exception as e:  # pyautogui's fail-safe: The user slammed the mouse into a screen corner
+            except Exception as e:  # pyautogui's fail-safe: the user slammed the mouse into a screen corner
                 result = "Stopped: you moved the mouse into a corner." if "FailSafe" in type(e).__name__ else \
                     f"Stopped: {type(e).__name__}."
                 break
@@ -1168,7 +1188,7 @@ async def whatsapp_read(contact: str, ctx: Context) -> str:
 @mcp.tool()
 async def send_whatsapp_file(contact: str, path: str, ctx: Context, caption: str = "") -> str:
     """Send a file or photo (from the user folders, Documents/Karen or files added with +) to a WhatsApp contact.
-    Karen reads it back and only sends after their yes."""
+    Karen reads it back and only sends after his yes."""
     import asyncio
     uploads = os.path.join(ROOT, "data", "uploads")
     places = [resolve(path)] + ([] if os.path.isabs(path) else
@@ -1198,7 +1218,7 @@ async def send_whatsapp_file(contact: str, path: str, ctx: Context, caption: str
 @mcp.tool()
 async def send_whatsapp(contact: str, message: str, ctx: Context) -> str:
     """Send a WhatsApp message to a contact or group through WhatsApp (app or WhatsApp Web), typing it for the user.
-    Karen reads the message back and only sends after their yes."""
+    Karen reads the message back and only sends after his yes."""
     found = await _whatsapp_window()
     if not found:
         return "WhatsApp Web didn't open. Is it signed in in the browser?"

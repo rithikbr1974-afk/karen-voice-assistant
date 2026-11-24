@@ -1,0 +1,30 @@
+/* Study mode: black and yellow (his request, 2026-10-29). body.study on Karen's window (on top of either look), and
+   the whole study window (ui/study.html). */
+body.study {
+  --bg: #000;
+  --text: #fdf8e1;
+  --muted: rgba(253, 248, 225, .58);
+  --faint: rgba(253, 248, 225, .36);
+  --glass: rgba(250, 204, 21, .045);
+  --glass-hi: rgba(250, 204, 21, .09);
+  --edge: rgba(250, 204, 21, .2);
+  --primary: #facc15;
+  --primary-dim: rgba(250, 204, 21, .5);
+  --magenta: #fb923c;
+  --cyan: #fde047;
+  --amber: #f59e0b;
+  --accent: var(--primary);
+  --grad: linear-gradient(120deg, #fde047 0%, #facc15 45%, #f59e0b 100%);
+  background: #000;
+}
+body.study::before {
+  background: radial-gradient(40% 35% at 18% 12%, rgba(250, 204, 21, .10), transparent 70%),
+              radial-gradient(35% 30% at 85% 85%, rgba(245, 158, 11, .08), transparent 70%);
+}
+body.study .brand h1 { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+body.study .panel { border-color: var(--edge); }
+body.study .msg.you { background: linear-gradient(135deg, #facc15, #f59e0b); color: #111; }
+body.study .msg.you .meta { color: rgba(0, 0, 0, .6); }
+body.study .hud .dot, body.study .ability.on .led { background: #facc15; box-shadow: 0 0 8px #facc15; }
+body.study #dock .btn.talk { background: linear-gradient(135deg, #fde047, #f59e0b); color: #111; }
+body.study #btn-study.on { color: #111; background: var(--grad); border-color: transparent; box-shadow: 0 0 14px rgba(250, 204, 21, .5); }

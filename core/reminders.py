@@ -28,9 +28,27 @@ def advance(r, now=None):
         return r
     while due <= now:
         due += step
-    for _ in range(2000):  # skip the hours outside their window (e.g. the night)
+    for _ in range(2000):  # skip the hours outside his window (e.g. the night)
         if _in_window(due, r.get("window")):
             break
         due += step
     r["due"] = due.isoformat(timespec="minutes")
     return r
+
+
+def snooze(item, minutes=5, path="data/reminders.json"):
+    """The island's Snooze: the same reminder or timer again in a few minutes, as a new one-off item."""
+    import json
+    import os
+    try:
+        with open(path, encoding="utf-8") as f:
+            items = json.load(f)
+    except (OSError, ValueError):
+        items = []
+    now = datetime.datetime.now()
+    items.append({"id": max([r.get("id", 0) for r in items] or [0]) + 1, "text": item.get("text", "Reminder"),
+                  "due": (now + datetime.timedelta(minutes=minutes)).isoformat(timespec="seconds"), "repeat": None,
+                  "done": False, "timer": bool(item.get("timer")), "set": now.isoformat(timespec="seconds")})
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=1, ensure_ascii=False)
+    os.replace(path + ".tmp", path)

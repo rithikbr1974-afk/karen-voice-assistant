@@ -2,7 +2,7 @@
 
     python scripts/autostart.py remote on     Karen Remote at sign-in (text only: Telegram/WhatsApp)
     python scripts/autostart.py remote off
-    python scripts/autostart.py on | off      voice Karen at sign-in, hidden in the tray
+    python scripts/autostart.py on | off      voice Karen at sign-in (he prefers starting her himself)
 """
 import os
 import subprocess
@@ -11,7 +11,9 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 STARTUP = os.path.join(os.environ["APPDATA"], r"Microsoft\Windows\Start Menu\Programs\Startup")
 TARGETS = {"karen": ("Karen.lnk", "main.py --background", "Karen voice assistant"),
-           "remote": ("Karen Remote.lnk", "remote.py", "Karen Remote (phone chat, no microphone)")}
+           "remote": ("Karen Remote.lnk", "remote.py", "Karen Remote (phone chat, no microphone)"),
+           }
+PYTHONW = {}
 
 
 def ps_quote(s):
@@ -30,7 +32,7 @@ def main():
             os.remove(link)
         print(f"{description} will no longer start with Windows.")
         return
-    pythonw = os.path.join(ROOT, ".venv", "Scripts", "pythonw.exe")  # no console window
+    pythonw = PYTHONW.get(which) or os.path.join(ROOT, ".venv", "Scripts", "pythonw.exe")  # no console window
     script = (f"$s = (New-Object -ComObject WScript.Shell).CreateShortcut({ps_quote(link)}); "
               f"$s.TargetPath = {ps_quote(pythonw)}; $s.Arguments = {ps_quote(arguments)}; "
               f"$s.WorkingDirectory = {ps_quote(ROOT)}; $s.Description = {ps_quote(description)}; $s.Save()")

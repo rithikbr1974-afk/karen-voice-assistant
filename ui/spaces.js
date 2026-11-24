@@ -1,7 +1,7 @@
 /* Spaces drawer: pages your Dots write (data/spaces) and the Dots themselves (specialist helpers).
    Uses app.js's $, api() and toast(). Python pushes Dot progress with window.karen.dots(status).
    Page text comes from the web through an AI, so the Markdown renderer escapes everything first and only
-   makes http(s) links (opened in their browser) and page links (opened here). */
+   makes http(s) links (opened in his browser) and page links (opened here). */
 "use strict";
 
 /* ------------------------------------------------------------------ safe Markdown */

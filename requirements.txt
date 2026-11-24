@@ -9,6 +9,7 @@ pyyaml==6.0.3
 openwakeword==0.6.0
 pywebview==6.2.1
 psutil==7.2.2
+httpx==0.28.1   # Telegram/WhatsApp channels and CallMeBot calls (it was only there as mcp's dependency)
 mcp==2.2.0
 pycaw==20260927
 comtypes==1.4.17
@@ -23,8 +24,18 @@ pillow==12.3.0
 pypdf==6.19.0
 pypdfium2==5.13.0
 python-docx==1.2.0
+openpyxl==3.1.5                 # Excel reading (files.read_file)
+python-pptx==1.0.2              # PowerPoint reading (files.read_file)
 opencv-python-headless==5.0.0.93   # webcam for servers/explore look
 ddgs==9.16.0   # free web search (no key) for research mode
 trafilatura==2.3.0   # readable text from web pages for research reports
-segno==1.6.6   # QR codes
-scikit-learn==1.9.1   # trains your personal wake word (scripts/train_wake.py)
+segno==1.6.6   # QR codes (JARVIS tools)
+scikit-learn==1.9.1   # trains the personal wake word (scripts/train_wake.py)
+youtube-transcript-api==1.2.4   # YouTube video summaries (servers/extras)
+tokenizers==0.23.2   # the Cortex's word embedding (core/cortex/senses.py)
+soundcard==0.4.6   # meeting sound (speaker loopback) + mic for meeting notes (servers/meeting)
+winrt-runtime==4.1.0                      # Karen Island: now playing + media buttons (Windows media sessions)
+winrt-Windows.Media.Control==4!10.0.28000.2957
+winrt-Windows.Foundation==4!10.0.28000.2957
+winrt-Windows.Storage.Streams==4!10.0.28000.2957   # Karen Island: album art (the media session's thumbnail)
+imageio-ffmpeg==0.6.0   # ffmpeg for audio/video (transcribe, recordings) without a separate install

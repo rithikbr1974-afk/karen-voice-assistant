@@ -1,6 +1,6 @@
 """Score a wake-word model on recordings, the way the live detector hears them.
 
-  python scripts/eval_wake.py models/karen_personal.pkl voice_tests/session1
+  python scripts/eval_wake.py models/karen_personal_prev.pkl voice_tests/session2
 
 Recall: how many of the "Karen" clips wake her. False wakes: how often normal speech does, per hour (the sentences,
 and the request part of the "Karen, ..." commands, joined with room sound). Also tests over the music room sound.
@@ -92,4 +92,4 @@ if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     pat = next((int(a.split("=")[1]) for a in sys.argv if a.startswith("--patience=")), None)
     thr = next((float(a.split("=")[1]) for a in sys.argv if a.startswith("--threshold=")), None)
-    main(args[0], args[1] if len(args) > 1 else "voice_tests/session1", only_threshold=thr, patience=pat)
+    main(args[0], args[1] if len(args) > 1 else "voice_tests/session2", only_threshold=thr, patience=pat)

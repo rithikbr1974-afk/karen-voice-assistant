@@ -51,7 +51,7 @@ Full list of things to say: **[docs/FEATURES.md](docs/FEATURES.md)**
 You need **Windows 10 or 11**, **[Python 3.12](https://www.python.org/downloads/)** and a microphone. A GPU isn't needed.
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/karen-voice-assistant.git
+git clone https://github.com/rithikbr1974-afk/karen-voice-assistant.git
 cd karen-voice-assistant
 setup.bat
 ```

@@ -41,7 +41,7 @@ somewhere with space, for example `D:\karen-voice-assistant`.
 
 **Option B, with Git:**
 ```bash
-git clone https://github.com/YOUR-USERNAME/karen-voice-assistant.git
+git clone https://github.com/rithikbr1974-afk/karen-voice-assistant.git
 ```
 
 > Avoid putting Karen inside OneDrive. OneDrive tries to sync the 1.5 GB of models.
